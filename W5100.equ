@@ -1,0 +1,79 @@
+MR	equ $00
+GAR	equ $01
+SUBR	equ $05
+SHAR	equ $09
+SIPR	equ $0f
+IR	equ $15
+IMR	equ $16
+RTR	equ $17
+RCR	equ $19
+RMSR	equ $1A
+TMSR	equ $1b
+UIPR	equ $2a
+UPORT	equ $2e
+
+Sn_MR	equ $00
+Sn_CR	equ $01
+Sn_IR	equ $02
+Sn_SR	equ $03
+Sn_PORT	equ $04
+SN_DHAR	equ $06
+Sn_DIPR	equ $0c
+Sn_DPORT	equ $10
+Sn_MSS	equ $12
+Sn_PROTO	equ $14
+Sn_TOS	equ $15
+Sn_TTL	equ $16
+
+Sn_RXBUF_SIZE	equ $1e
+Sn_TXBUF_SIZE	equ $1f
+
+Sn_TX_FSR	equ $20
+Sn_TX_RD	equ $22
+Sn_TX_WR	equ $24
+Sn_RX_RSR	equ $26
+Sn_RX_RD	equ $28
+Sn_RX_WR	equ $2a
+
+Sn_FRAGR	equ $2d
+
+
+Sn_MR_CLOSED	equ $00
+Sn_MR_TCP	equ $01
+Sn_MR_UDP	equ $02
+Sn_MR_IPRAW	equ $03
+Sn_MR_MACRAW	equ $04
+
+Sn_CR_OPEN	equ $01
+Sn_CR_LISTEN	equ $02
+Sn_CR_CONNECT	equ $04
+Sn_CR_DISCON	equ $08
+Sn_CR_CLOSE	equ $10
+Sn_CR_SEND	equ $20
+Sn_CR_SEND_MAC	equ $21
+Sn_CR_SEND_KEEP	equ $22
+Sn_CR_RECV	equ $40
+
+Sn_SR_SOCK_CLOSED	equ $00
+Sn_SR_SOCK_INIT	equ $13
+Sn_SR_SOCK_LISTEN	equ $14
+Sn_SR_SOCK_ESTABLISHED	equ $17
+Sn_SR_SOCK_CLOSE_WAIT	equ $1c
+Sn_SR_SOCK_UDP	equ $22
+Sn_SR_SOCK_IPRAW	equ $32
+Sn_SR_SOCK_MACRAW	equ $42
+Sn_SR_SOCK_SYNSENT	equ $15
+Sn_SR_SOCK_SYNRECV	equ $16
+Sn_SR_SOCK_FIN_WAIT	equ $18
+Sn_SR_SOCK_CLOSING	equ $1a
+Sn_SR_SOCK_TIME_WAIT	equ $1b
+Sn_SR_SOCK_LAST_ACK	equ $1d
+Sn_SR_SOCK_ARP	equ $01
+
+
+Sn_IR_CON	equ $01
+Sn_IR_DISCON	equ $02
+Sn_IR_RECV	equ $04
+Sn_IR_TIMEOUT	equ $08 
+Sn_IR_SEND	equ $10
+

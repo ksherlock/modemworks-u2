@@ -1,0 +1,846 @@
+	string asis
+	machine m65c02
+	case on
+
+	longa off
+	longi off
+
+	include 'OMM.equ'
+	include 'TimeTool.equ'
+	include 'PortTool.equ'
+	include 'ConsoleTool.equ'
+	include 'W5100.equ'
+
+	macro
+&l	cstr &x
+&l	dc.b &x, 0
+	endm
+
+d0	equ $00
+
+a1	equ $3c
+a2	equ $3e
+a4	equ $42
+
+
+prmtbl	equ $e0
+lowtr	equ $9b
+
+Header	proc
+
+	dc.w $0000 ; header version
+	dc.w 'pt' ; unique id
+	dc.w end-start ; size
+	dc.w start
+	dc.w $0000
+	dc.w $0000 ; module kind
+	dc.w $0000 ; reserved
+	dc.w $0000 ; reserved
+
+start
+
+	cmp #MSG_INIT
+	beq do_life
+	cmp #MSG_QUIT
+	beq do_life
+	cmp #MSG_INFO
+	beq do_info
+	cmp #MSG_USER
+	beq do_user
+	rts
+
+do_info
+	lda a_info
+	sta a1
+	lda a_info+1
+	sta a1+1
+	rts
+
+do_life
+	; find the time tool ('tt') and console tool ('tt')
+	lda #'t'
+	sta a1
+	sta a1+1
+	ldy #OMM_ID
+	ldx #OMM_GETID
+	jsr OMMVEC
+	stx tt_id
+
+	lda #'c'
+	sta a1
+	lda #'t'
+	sta a1+1
+	ldy #OMM_ID
+	ldx #OMM_GETID
+	jsr OMMVEC
+	stx ct_id
+
+	rts
+
+
+do_user
+	tya
+	asl a
+	tax
+	jmp (user_dispatch,x)
+
+
+*
+* Called by & SLOT numexpr
+*
+open
+close
+*
+* Called by & USR 6
+*
+reset
+*
+* Called by & BREAK
+*
+send_break
+out_buffering
+*
+* Called by & USR 7/8
+*
+set_dcd
+*
+* Called by & USR 10
+*
+set_dtr
+*
+* Called by & USR 9
+*
+clear_dtr
+set_port_bits
+*
+* Called by & SPEED=numexpr
+*
+set_speed
+set_flow
+
+add_comp_vec
+del_comp_vec
+clear_comp_vec
+	rts
+
+*
+* Called by & FN 8
+*
+get_speed
+	lda #15 ; 19200
+	rts
+
+
+get_in_buf
+set_in_buf
+	rts
+
+*
+* Called by & FN 11
+* Called by & TERM
+*
+get_dcd
+*
+* output: C = 0 disconnected / no carrier
+* output: C = 1 connected / carrier
+*
+	lda #4
+	sta $c0b5
+	lda #Sn_SR
+	sta $c0b6
+	lda $c0b7
+	cmp #Sn_SR_SOCK_CLOSE_WAIT
+	beq @d
+	cmp #Sn_SR_SOCK_ESTABLISHED
+	bne @nocarrier
+
+	sec
+	rts
+@d
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_DISCON
+	sta $c0b7
+@nocarrier
+	clc
+	rts
+
+
+read_tx_wr
+*
+* set a1=Sn_TX_WR, set IDM=write buffer address
+*
+	lda #4
+	sta $c0b5
+	lda #Sn_TX_WR
+	sta $c0b6
+
+	lda $c0b7
+	sta a1+1
+	lda $c0b7
+	sta a1
+
+	sta $c0b6
+	lda a1+1
+	and #$1f
+	ora #$40
+	sta $c0b5
+	rts
+
+write_tx_wr
+*
+* set Sn_TX_WR = a1, do Sn_CR_SEND
+*
+
+	lda #4
+	sta $c0b5
+	lda #Sn_TX_WR
+	sta $c0b6
+
+	lda a1+1
+	sta $c0b7
+	lda a1
+	sta $c0b7
+
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_SEND
+	sta $c0b7
+
+	rts
+
+read_rx_rd
+*
+* outputs: a1 = rx_rd
+* outputs: a2 = rx_rsr
+*
+	lda #4
+	sta $c0b5
+	lda #Sn_RX_RSR
+	sta $c0b6
+	lda $c0b7
+	sta a2+1
+	lda $c0b7
+	sta a2
+
+	lda $c0b7
+	sta a1+1
+	lda $c0b7
+	sta a1
+
+
+	lda a1
+	sta $c0b6
+	lda a1+1
+	and #$1f
+	ora #$60
+	sta $c0b5
+
+	rts
+
+write_rx_rd
+*
+* set Sn_RX_RD = a1, clear Sn_IR_RECV do Sn_CR_RECV
+*
+
+	lda #4
+	sta $c0b5
+	lda #Sn_RX_RD
+	sta $c0b6
+
+	lda a1+1
+	sta $c0b7
+	lda a1
+	sta $c0b7
+
+	lda #Sn_IR
+	sta $c0b6
+	lda #Sn_IR_RECV
+	sta $c0b7
+
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_RECV
+	sta $c0b7
+
+	rts
+
+
+*
+* Called by & RECV
+* Called by & SEND
+*
+get_timed_byte
+*
+* input: prmtbl[0:1] = ticks
+* output: C = 0 no input
+* output: C = 1, a = character
+* output: V = 1, carrier lost
+*
+
+
+	stz int_flag
+	jsr tb_callback
+	bcs @check
+
+@wait
+
+	lda a_tb_callback
+	sta prmtbl+2
+	lda a_tb_callback+1
+	sta prmtbl+3
+
+	ldx tt_id
+	ldy #WaitTicks
+	jsr OMMVEC
+	bcs @check
+
+	; timeout.
+;	clc
+	clv
+	rts
+
+@check
+	lda int_flag
+	bit #Sn_IR_DISCON
+	bne @d
+
+	jsr read_char
+	clv
+	rts
+
+
+@d
+; disconnected.
+;	lda #Sn_CR
+;	sta $c0b6
+;	lda #Sn_CR_DISCON
+;	sta $c0b7
+	clc
+	bit @rts ; setv
+@rts
+	rts
+
+tb_callback
+
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+
+	lda $c0b7
+	sta int_flag
+	clc
+	and #(Sn_IR_RECV or Sn_IR_DISCON)
+	cmp #1
+	rts
+
+
+*
+* Called by & FN 5
+* Called by & RECV
+* Called by & SEND
+* Called by & TERM
+*
+read_char
+*
+* inputs: None
+* outputs: C = 0; no char
+* outputs: C = 1; char in A
+
+	jsr read_rx_rd
+	lda a2
+	ora a2+1
+	bne @ok
+	clc
+	rts
+@ok
+
+	lda a1
+	clc
+	adc #1
+	sta a1
+	lda a1+1
+	adc #0
+	sta a1+1
+
+	lda $c0b7
+
+	pha
+	jsr write_rx_rd
+	sec
+	pla
+	rts
+
+
+read_buffer
+* input:
+* prmtbl[0:1] = count
+* prmtbl[2:3] = data buffer
+* output: None
+
+
+* nyi.
+
+	if 0 then
+	lda prmtbl
+	ora prmtbl+1
+	bne @ok
+	rts
+@ok
+
+	jsr read_rx_rd
+	; a1 = rx_rd
+	; a2 = rx_rsr
+
+	; read min(count, rsr)
+
+	lda prmtbl+1
+	cmp a2+1
+	bcc @lt
+	beq @eq1
+	; count >= rsr!
+	bra read_buffer_underflow
+
+@eq1
+	lda prmtbl
+	cmp a2
+	beq @lt
+	bcc @lt
+	; count >= rsr!
+	bra read_buffer_underflow
+
+@lt
+	; count <= rsr
+	lda prmtbl
+	sta a2
+	lda prmtbl+1
+	sta a2+1
+
+
+; read a2 bytes
+	lda a2
+	clc
+	adc a1
+	sta a1
+	lda a2+1
+	adc #0
+	sta a2+1
+
+	ldy #0
+	lda a2+1
+	beq @partial
+
+@floop
+	lda $c0b7
+	sta (prmtbl+2),y
+	iny
+	bne @floop
+
+	inc prmtbl+3
+	bne @loop
+
+; partial
+@partial
+	lda $c0b7
+	sta (prmtbl+2),y
+	iny
+	cpy a2
+	bne @partial
+
+	; for underflow case.
+	lda a2
+	clc
+	adc prmtbl+2
+	sta prmtbl+2
+	lda prmtbl+3
+	adc #0
+	sta prmtbl+3
+
+	jmp write_rx_rd
+
+read_buffer_underflow
+	; read buffer count is > available count.
+
+	; loop until data available or connection closes.
+
+
+	endif
+	rts
+
+get_in_q
+*
+* outputs: prmtbl[0:1] = read buffer size
+
+	lda #4
+	sta $c0b5
+	lda #Sn_RX_RSR
+	sta $c0b6
+	lda $c0b7
+	sta prmtbl+1
+	lda $c0b7
+	sta prmtbl
+	rts
+
+*
+* Called by & CLEAR
+*
+flush_in_q
+	jsr read_rx_rd
+	lda a2
+	ora a2+1
+	beq @nope
+
+	lda a2
+	clc
+	adc a1
+	sta a1
+	lda a2+2
+	adc a1+1
+	sta a1+1
+
+	jmp write_rx_rd
+@nope
+	rts
+
+
+*
+* Called by & RECV
+* Called by & SEND
+* Called by & TERM
+*
+write_char
+*
+* inputs: prmtbl[0] = character
+* outputs: none
+*
+
+	jsr read_tx_wr
+
+	lda prmtbl
+	sta $c0b7
+
+	lda a1
+	clc
+	adc #1
+	sta a1
+	lda a1+1
+	adc #0
+	sta a1+1
+
+	jmp write_tx_wr
+
+	rts
+
+
+*
+* Called by & PUT (strexpr)
+*
+write_buffer
+* input prmtbl[0:1] count
+* input prmtbl[2:3]	data buffer address
+* output: none
+
+	lda prmtbl
+	ora prmtbl+1
+	beq @rts
+
+	jsr read_tx_wr
+
+	; bump a1 now
+	lda prmtbl
+	clc
+	adc a1
+	sta a1
+	lda prmtbl+1
+	adc a1+1
+	sta a1+1
+
+	ldy #0
+	lda prmtbl+1
+	beq @partial
+; copy 256 bytes
+
+@floop
+	lda (prmtbl+2),y
+	sta $c0b7
+	iny	
+	bne @floop
+	inc prmtbl+3
+	dec prmtbl+1
+	bne @floop ; y = 0
+
+@partial
+	lda prmtbl
+	beq @done
+@ploop
+	lda (prmtbl+2),y
+	sta $c0b7
+	iny	
+	cpy prmtbl
+	bne	@ploop
+
+@done
+	jmp write_tx_wr
+
+@rts
+	rts
+
+
+*
+* search
+*
+
+*
+* Called by & WAIT [numexpr] FOR strexpr
+* Called by Modem Tool (for modem result codes)
+
+clear_search
+	stz string_count
+	ldx #20*2+10-1
+@loop
+	stz string_table,x
+	dex
+	bpl @loop
+	rts
+
+
+add_search
+	jsr find_search_x
+	bcs @rts ; already there.
+	jsr find_free_x
+	bcc @rts
+
+	inc string_count
+
+	lda prmtbl
+	sta string_table,x
+	lda prmtbl+1
+	sta string_table+1,x
+
+	txa
+	lsr a
+	tax
+	stz string_pos,x
+	inc string_count
+
+@rts
+	rts
+
+del_search
+	jsr find_search_x
+	bcc @rts
+
+	stz string_table,x
+	stz string_table+1,x
+	dec string_count
+
+@rts
+	rts
+
+
+find_search_x
+*
+* returns C=1,X if found
+* retusn C=0 if not found
+*
+	ldx #20*2-2
+@loop
+	lda string_table,x
+	cmp prmtbl
+	bne @next
+	lda string_table+1,x
+	cmp prmtbl+1
+	bne @next
+	sec
+	rts
+
+@next
+	dex
+	dex
+	bpl @loop
+
+	clc
+	rts
+
+find_free_x
+	ldx #20*2-2
+@loop
+	lda string_table,x
+	ora string_table+1,x
+	bne @next
+	sec
+	rts
+@next
+	dex
+	dex
+	bpl @loop
+	clc
+	rts
+
+
+show_search
+
+	ldx ct_id
+	beq get_search
+
+	jsr read_char
+	bcc search_fail
+
+	pha
+	sta prmtbl
+	ldx ct_id
+	ldy #CTWriteChar
+	jsr OMMVEC
+	pla
+	bra search_common
+
+
+get_search
+
+	jsr read_char
+	bcs search_common
+
+search_fail
+	stz prmtbl
+	stz prmtbl+1
+	rts
+
+search_common
+
+	and #$5f ; upper-case it
+	sta char
+
+	ldx #20*2-2
+@loopx
+	phx
+	lda string_table,x
+	sta d0
+	lda string_table+1,x
+	sta d0+1
+	ora d0
+	beq @next
+
+	phx
+	txa
+	lsr a
+	tax
+	ldy string_pos,x
+	lda (d0),y
+	and #$5f ; upper case
+	cmp char
+	bne @no
+	inc string_pos,x
+	; if next char is 0, this is a match
+	iny
+	lda (d0),y
+	bne @next
+
+; match!
+	plx
+	lda d0
+	sta prmtbl
+	lda d0+1
+	sta prmtbl+1
+	; reset search pos
+	ldx #20-1
+@zloop
+	stz string_pos,x
+	dex
+	bpl @zloop
+	rts
+
+
+@no
+	stz string_pos,x
+	; also check first char
+	cpy #0
+	bne @next
+	lda (d0)
+	and #$5f
+	cmp char
+	bne @next
+	inc string_pos,x
+	; can't be a 1-char string since that would 
+	; be matched above.
+
+@next
+	plx
+	dex
+	dex
+	bpl @loopx
+
+	stz prmtbl
+	stz prmtbl+1
+	rts
+
+
+	dc.b $00 ; end code
+
+*
+* immediate section
+*
+
+a_info	dc.w info
+a_tb_callback
+	dc.w tb_callback
+
+user_dispatch
+	dc.w open
+	dc.w close
+	dc.w reset
+	dc.w send_break
+	dc.w set_dtr
+	dc.w clear_dtr
+	dc.w set_port_bits
+	dc.w set_speed
+	dc.w get_speed
+	dc.w get_dcd
+	dc.w write_char
+	dc.w write_buffer
+	dc.w read_char
+	dc.w read_buffer
+	dc.w flush_in_q
+	dc.w get_in_q
+	dc.w get_in_buf
+	dc.w set_in_buf
+	dc.w set_flow
+	dc.w add_comp_vec
+	dc.w del_comp_vec
+	dc.w clear_comp_vec
+	dc.w add_search
+	dc.w del_search
+	dc.w get_search
+	dc.w show_search
+	dc.w clear_search
+	dc.w get_timed_byte
+	dc.w out_buffering
+	dc.w set_dcd
+
+	dc.w $0000 ; end immed
+
+*
+* data section
+*
+
+	msb on
+info	cstr '&SYSDATE Serial (W5100) 1.0'
+	msb off
+
+tt_id	dc.b 0
+ct_id	dc.b 0
+
+int_flag
+	dc.b 0
+
+char	dc.b 0
+string_count
+	dc.b 0
+string_table
+	dcb.w 20,0
+string_pos
+	dcb.b 20,0
+
+end
+	endp
+	end

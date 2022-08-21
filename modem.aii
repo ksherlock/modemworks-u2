@@ -1,0 +1,668 @@
+	string asis
+	machine m65c02
+	case on
+
+	longa off
+	longi off
+
+	include 'OMM.equ'
+	include 'TimeTool.equ'
+	include 'PortTool.equ'
+	include 'ConsoleTool.equ'
+	include 'W5100.equ'
+
+
+*
+* Server usage:
+*
+* & HANGUP [ HangUp]
+* & WAIT FOR CALL [IsRinging]
+* & PICKUP [AnswerLine / OrigAnswerLine]
+* & WAIT FOR CARRIER [HandleConnect]
+*
+*
+* Client usage:
+* & CALL "192.168.0.0.1:6502" [DialNumber]
+* & WAIT FOR CARRIER [HandleConnect]
+*
+
+* Proline (login.b):
+* &fn 1 ... 
+* & pickup
+* & wait for carrier
+* ...
+* & hangup
+*
+
+	macro
+&l	cstr &x
+&l	dc.b &x, 0
+	endm
+
+d0	equ $00
+
+a1	equ $3c
+a2	equ $3e
+a4	equ $42
+
+
+prmtbl	equ $e0
+lowtr	equ $9b
+rndseed	equ $c9
+
+iqerr	equ $e199 ; generate illegal quantity error.
+
+
+Header	proc
+
+	dc.w $0000 ; header version
+	dc.w 'mt' ; unique id
+	dc.w end-start ; size
+	dc.w start
+	dc.w amperct
+	dc.w $0000 ; module kind
+	dc.w $0000 ; reserved
+	dc.w $0000 ; reserved
+
+start
+
+	cmp #MSG_USER
+	beq do_user
+	cmp #MSG_INIT
+	beq do_life
+	cmp #MSG_QUIT
+	beq do_life
+	cmp #MSG_BORN
+	beq do_life
+	cmp #MSG_INFO
+	beq do_info
+	cmp #MSG_AMPR
+	beq do_ampr
+	rts
+
+do_info
+	lda a_info
+	sta a1
+	lda a_info+1
+	sta a1+1
+	rts
+
+do_life
+	; find the time tool ('tt') and serial tool ('pt')
+	lda #'t'
+	sta a1
+	sta a1+1
+	ldy #OMM_ID
+	ldx #OMM_GETID
+	jsr OMMVEC
+	stx tt_id
+
+	lda #'p'
+	sta a1
+	lda #'t'
+	sta a1+1
+	ldy #OMM_ID
+	ldx #OMM_GETID
+	jsr OMMVEC
+	stx pt_id
+
+	rts
+
+
+do_user
+	tya
+	asl a
+	tax
+	jmp (user_dispatch,x)
+
+
+do_ampr
+; & mset address
+ampr_mset
+	jmp $d995 ; data - skips to next : or EOL.
+;	jsr frmnum
+;	jsr getadr
+	rts
+
+
+read_status
+	lda #4
+	sta $c0b5
+	lda #Sn_SR
+	sta $c0b6
+	lda $c0b7
+	rts
+
+command_x
+	lda #4
+	sta $c0b5
+	lda #Sn_CR
+	sta $c0b6
+	stx $c0b7
+	rts
+
+listen_or_connect
+	; x = Sn_CR_LISTEN or Sn_CR_CONNECT
+	lda #4
+	sta $c0b5
+	stz $c0b6
+	lda #Sn_MR_TCP
+	sta $c0b7
+	lda #Sn_CR_DISCON
+	sta $c0b7
+	dec $c0b6
+	lda #Sn_CR_CLOSE
+	sta $c0b7
+	dec $c0b6
+	lda #Sn_CR_OPEN
+	sta $c0b7
+	lda #$ff
+	sta $c0b7 ; clear int flags
+
+	lda #Sn_PORT
+	sta $c0b6
+	lda rndseed
+	sta $c0b7
+	inc lport
+	lda lport
+	sta $c0b7
+
+	lda #Sn_CR
+	sta $c0b6
+	stx $c0b7
+	rts
+
+listen
+	sec
+	ror server
+
+	ldx #Sn_CR_LISTEN
+	jmp listen_or_connect
+
+*
+* called by & SLOT (modem-slot)
+*
+init
+* prmtbl[0] = slot
+
+	; this should do dhcp, store slot ptrs 
+	; so it's not hardcoded.
+	lda #1
+	rts
+
+exit
+
+	lda #4
+	sta $c0b5
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_CLOSE
+	sta $c0b7
+
+	rts
+
+
+*
+* called by &fn 0
+*
+online
+* online: A=1
+* offline: A=0
+
+	jsr read_status
+	cmp #Sn_SR_SOCK_CLOSE_WAIT
+	beq @d
+	cmp #Sn_SR_SOCK_ESTABLISHED
+	bne @no
+	lda #1
+	rts
+
+@d
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_DISCON
+	sta $c0b7
+
+@no
+	lda #0
+	rts
+
+*
+* Called by &USR 6
+*
+reset
+	lda #1
+	rts
+
+has_mnp
+	lda #1
+	rts
+set_mnp
+* prmtbl[0]=0 ; disable error correction
+* prmtbl[0]=1 ; enable error correction
+	rts
+
+*
+* Called by & CALL string
+*
+dial_number
+* Input: 
+* prmtbl[0] = length of string
+* prmtbl[1:2] = address of string
+* prmtbl[3] = Touch-Tone (1) or Pulse. [set to 1]
+
+* parse as xx.xx.xx.xx:port
+
+
+	ldx #6-1
+@zloop	stz ip,x
+	dex
+	bne @zloop
+
+	ldy #0
+	ldx #0
+
+	lda prmtbl
+	beq @err
+
+@loop
+	lda (prmtbl+1),y
+	cmp #'.'
+	beq @dot
+	cmp #':'
+	beq @colon
+
+	cmp #'0'
+	bcc @err
+	cmp #'9'+1
+	bcs @err
+	and #$0f
+	pha
+;	lda ip,x
+;	cmp #26
+;	bcs @err
+
+	lda ip,x
+	jsr ip_m10
+	pla
+	clc
+	adc ip,x
+	sta ip,x
+	iny
+	cpy prmtbl
+	bcs @err
+	bra @loop
+
+@dot
+	inx
+	cpx #4
+	bcs @err
+	bra @loop
+@err
+	rts
+
+@colon
+	cpx #3
+	bne @err
+	iny
+	cpy prmtbl
+	bcs @err
+@ploop
+	lda (prmtbl+1),y
+	cmp #'0'
+	bcc @err
+	cmp #'9'+1
+	bcs @err
+	and #$0f
+	pha
+	jsr port_m10
+	pla
+	clc
+	adc port
+	sta port
+	lda #0
+	adc port+1
+	sta port+1
+	iny
+	cpy prmtbl
+	bcc @ploop
+;
+; ip + port ok!
+;
+
+	lda #4
+	sta $c0b5
+	lda #Sn_DIPR
+	sta $c0b6
+	ldx #0
+@xloop
+	lda ip,x
+	sta $c0b7
+	inx
+	cpx #6
+	bne @xloop
+
+
+
+	stz server
+	ldx #Sn_CR_CONNECT
+	jmp listen_or_connect
+
+
+ip_m10
+	asl a ; x 2
+	sta tmp
+	asl a ; x 4
+	asl a ; x 8
+	clc
+	adc tmp
+	rts
+
+port_m10
+	asl port ; x 2
+	rol port+1
+
+	lda port
+	sta tmp
+	lda port+1
+	sta tmp+1
+
+	asl port ; x 4
+	rol port+1
+
+	asl port ; x 8
+	rol port+1
+	clc
+	lda port
+	adc tmp
+	sta port
+	lda port+1
+	adc tmp+1
+	sta port+1
+	rts
+
+
+
+*
+* Called by & PICKUP 2
+*
+set_busy:
+* prmtbl[0] = 0; go on hook
+* prmtbl[0] = 1; go off hook
+*
+	lda prmtbl
+	sta busy
+
+	beq @off
+	jmp listen
+
+@off
+	ldx #Sn_CR_CLOSE
+	jmp command_x
+
+
+
+*
+* Called by & WAIT FOR CARRIER
+*
+handle_connect
+* Input:
+* prmtbl[0:1] = seconds to wait
+* Output:
+* A = result code
+* wait until Sn_IR_CON or timeout.
+
+	stz ir
+	jsr handle_connect_cb
+	bcs @check
+
+@wait
+	lda a_handle_connect_cb
+	sta prmtbl+2
+	lda a_handle_connect_cb+1
+	sta prmtbl+3
+
+	ldx tt_id
+	ldy #WaitSeconds
+	jsr OMMVEC
+
+	bcc @to
+@check
+	lda ir
+	bit #Sn_IR_TIMEOUT
+	bne @to
+	bit #Sn_IR_CON
+	bne @ok
+	; ????
+@to
+	jsr listen
+	lda #2 ; no connection.
+	rts
+
+@ok
+	; clear the connect int. bit
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+	lda #Sn_IR_CON
+	sta $c0b7
+	lda #0 ; connection established
+	rts
+
+handle_connect_cb
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+	lda $c0b7
+	sta ir
+	and #(Sn_IR_CON or Sn_IR_TIMEOUT)
+	cmp #1
+	rts
+
+
+*
+* called by & PICKUP [0]
+*
+answer_line
+* pick up the phone and send answer carrier tone
+	stz mode
+answer_common
+	; clear the connect int. bit
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+	lda #Sn_IR_CON
+	sta $c0b7
+	rts
+
+*
+* Called by & PICKUP 1
+*
+orig_ans_line
+	lda #1
+	sta mode
+	bra answer_common
+
+*
+* called by & HANGUP
+*
+hang_up
+	jmp listen
+
+
+*
+* Called by & FN 1
+* Called by & WAIT FOR CALL
+is_ringing
+* C=0; no ring
+* C=1; ring detected.
+
+
+* "ring" if server mode and Sn_IR_CON flag set.
+
+	lda server
+	beq @no
+
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+	lda $c0b7
+	and #Sn_IR_CON
+	beq @no
+	sec
+	rts
+
+
+@no
+	clc
+	rts
+
+
+*
+* Called by & USR 3/4/5
+*
+set_speaker
+* prmtbl[0] = speaker mode
+	rts
+
+*
+* Called by & FN 3
+*
+get_mode
+	lda mode ; answer mode
+	rts
+*
+* Called by & FN 6
+*
+modem_type
+	lda #1 ; internal
+	rts
+
+
+
+set_modem
+* prmtbl[0:1] = address of modem cap
+	rts
+
+*
+* Called by & SPEED=
+*
+set_modem_speed
+* prmtbl[0] = speed
+	rts
+
+*
+* called by & WAIT FOR STRING to clear modem string search.
+*
+remove_search_strings
+* undocumented.
+	rts
+
+*
+* Called by & FN 9 , & FN 2
+*
+connect_speed
+* output:
+* A = speed
+	lda #15 ; 19200
+	sta prmtbl
+	rts
+
+*
+* Called by & FN 128
+*
+connect_speed_cstr
+* output:
+* prmtbl[0:1] = c-str of the connect speed
+
+	lda a_connect_speed_str
+	sta prmtbl
+	lda a_connect_speed_str+1
+	sta prmtbl+1
+	rts
+
+	dc.b 0
+
+*
+* immediate section
+*
+
+a_info	dc.w info
+a_connect_speed_str
+	dc.w connect_speed_str
+a_handle_connect_cb
+	dc.w handle_connect_cb
+
+user_dispatch
+	dc.w init
+	dc.w exit
+	dc.w online
+	dc.w has_mnp
+	dc.w dial_number
+	dc.w set_busy
+	dc.w handle_connect
+	dc.w answer_line
+	dc.w hang_up
+	dc.w is_ringing
+	dc.w set_mnp
+	dc.w orig_ans_line
+	dc.w reset
+	dc.w set_speaker
+	dc.w get_mode
+	dc.w modem_type
+	dc.w connect_speed
+	dc.w set_modem
+	dc.w set_modem_speed
+	dc.w remove_search_strings
+	dc.w connect_speed_cstr
+
+
+
+	dc.w 0
+
+*
+* data section
+*
+
+	msb on
+info	cstr '&SYSDATE Serial (W5100) 1.0'
+	msb off
+
+connect_speed_str cstr '19200'
+
+
+amperct
+	dc.b 'MSET',0
+	dc.b -1
+
+mult_table
+;	dc.b 0,10,20,30,40,50,60,70,80,90
+;	dc.b 100,110,120,130,140,150,160,170,180,190
+;	dc.b 200,210,220,230,240,250
+
+
+
+tt_id	dc.b 0
+pt_id	dc.b 0
+
+server	dc.b 0
+mode	dc.b 0
+busy	dc.b 0
+
+
+ip	dc.l 0
+port	dc.w 0
+
+; local port; incremented w/ connect/listen.
+; other half is from RND seed. (and adjusted by RND())
+lport	dc.b $00
+
+tmp	dc.w 0
+ir	dc.b 0
+end
+	endp
+	end
