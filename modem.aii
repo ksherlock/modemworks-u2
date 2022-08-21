@@ -68,6 +68,7 @@ start
 
 	cmp #MSG_USER
 	beq do_user
+
 	cmp #MSG_INIT
 	beq do_life
 	cmp #MSG_QUIT
@@ -141,6 +142,15 @@ command_x
 	stx $c0b7
 	rts
 
+store_x_to_IR
+; store x to Sn_IR
+	lda #4
+	sta $c0b5
+	lda #Sn_IR
+	sta $c0b6
+	stx $c0b7
+	rts
+
 listen_or_connect
 	; x = Sn_CR_LISTEN or Sn_CR_CONNECT
 	lda #4
@@ -210,18 +220,16 @@ online
 * offline: A=0
 
 	jsr read_status
-	cmp #Sn_SR_SOCK_CLOSE_WAIT
-	beq @d
 	cmp #Sn_SR_SOCK_ESTABLISHED
 	bne @no
 	lda #1
 	rts
 
-@d
-	lda #Sn_CR
-	sta $c0b6
-	lda #Sn_CR_DISCON
-	sta $c0b7
+;@d
+;	lda #Sn_CR
+;	sta $c0b6
+;	lda #Sn_CR_DISCON
+;	sta $c0b7
 
 @no
 	lda #0
@@ -265,70 +273,36 @@ dial_number
 	lda prmtbl
 	beq @err
 
+
+
+	ldy #0
+	ldx #0
 @loop
-	lda (prmtbl+1),y
-	cmp #'.'
-	beq @dot
-	cmp #':'
-	beq @colon
-
-	cmp #'0'
-	bcc @err
-	cmp #'9'+1
-	bcs @err
-	and #$0f
+	jsr get_num
 	pha
-;	lda ip,x
-;	cmp #26
-;	bcs @err
-
-	lda ip,x
-	jsr ip_m10
-	pla
-	clc
-	adc ip,x
+	; lda tmp+1
+	; bne @bad
+	lda tmp
 	sta ip,x
-	iny
-	cpy prmtbl
-	bcs @err
-	bra @loop
-
-@dot
 	inx
+	pla
 	cpx #4
 	bcs @err
-	bra @loop
-@err
-	rts
 
-@colon
-	cpx #3
+	cmp #'.'
+	beq @loop
+	cmp #':'
 	bne @err
-	iny
-	cpy prmtbl
-	bcs @err
-@ploop
-	lda (prmtbl+1),y
-	cmp #'0'
-	bcc @err
-	cmp #'9'+1
-	bcs @err
-	and #$0f
-	pha
-	jsr port_m10
-	pla
-	clc
-	adc port
+
+; port
+	jsr get_num
+	cmp #0
+	bne @err
+	lda tmp
 	sta port
-	lda #0
-	adc port+1
+	lda tmp+1
 	sta port+1
-	iny
-	cpy prmtbl
-	bcc @ploop
-;
-; ip + port ok!
-;
+
 
 	lda #4
 	sta $c0b5
@@ -347,38 +321,54 @@ dial_number
 	stz server
 	ldx #Sn_CR_CONNECT
 	jmp listen_or_connect
-
-
-ip_m10
-	asl a ; x 2
-	sta tmp
-	asl a ; x 4
-	asl a ; x 8
-	clc
-	adc tmp
+@err
 	rts
 
-port_m10
-	asl port ; x 2
-	rol port+1
+get_num
+	stz tmp
+	stz tmp+1
+@loop
+	lda (prmtbl+1),y
+	cmp #'0'
+	bcc @no
+	cmp #'9'+1
+	bcs @no
 
-	lda port
+	and #$0f
+	pha ; save
+
+	asl tmp ; x 2
+	rol tmp+1
+	lda tmp+1
+	pha
+	lda tmp
+	pha
+
+	asl tmp ; x 4
+	rol tmp+1
+	asl tmp ; x 8
+	rol tmp+1
+	clc
+	pla
+	adc tmp
 	sta tmp
-	lda port+1
+	pla
+	adc tmp+1
+	sta tmp+1
+	clc
+	pla
+	adc tmp
+	sta tmp
+	lda #0
+	adc tmp+1
 	sta tmp+1
 
-	asl port ; x 4
-	rol port+1
-
-	asl port ; x 8
-	rol port+1
-	clc
-	lda port
-	adc tmp
-	sta port
-	lda port+1
-	adc tmp+1
-	sta port+1
+	iny
+	cpy prmtbl
+	bcc @loop
+	lda #0
+	rts
+@no
 	rts
 
 
@@ -412,7 +402,7 @@ handle_connect
 * A = result code
 * wait until Sn_IR_CON or timeout.
 
-	stz ir
+	stz int_flag
 	jsr handle_connect_cb
 	bcs @check
 
@@ -428,9 +418,9 @@ handle_connect
 
 	bcc @to
 @check
-	lda ir
-	bit #Sn_IR_TIMEOUT
-	bne @to
+	lda int_flag
+;	bit #Sn_IR_TIMEOUT
+;	bne @to
 	bit #Sn_IR_CON
 	bne @ok
 	; ????
@@ -441,12 +431,8 @@ handle_connect
 
 @ok
 	; clear the connect int. bit
-	lda #4
-	sta $c0b5
-	lda #Sn_IR
-	sta $c0b6
-	lda #Sn_IR_CON
-	sta $c0b7
+	ldx #Sn_IR_CON
+	jsr store_x_to_IR
 	lda #0 ; connection established
 	rts
 
@@ -456,7 +442,7 @@ handle_connect_cb
 	lda #Sn_IR
 	sta $c0b6
 	lda $c0b7
-	sta ir
+	sta int_flag
 	and #(Sn_IR_CON or Sn_IR_TIMEOUT)
 	cmp #1
 	rts
@@ -469,14 +455,9 @@ answer_line
 * pick up the phone and send answer carrier tone
 	stz mode
 answer_common
-	; clear the connect int. bit
-	lda #4
-	sta $c0b5
-	lda #Sn_IR
-	sta $c0b6
-	lda #Sn_IR_CON
-	sta $c0b7
-	rts
+	; clear the connect int. bit [????]
+	ldx #Sn_IR_CON
+	jmp store_x_to_IR
 
 *
 * Called by & PICKUP 1
@@ -621,7 +602,6 @@ user_dispatch
 	dc.w connect_speed_cstr
 
 
-
 	dc.w 0
 
 *
@@ -629,7 +609,7 @@ user_dispatch
 *
 
 	msb on
-info	cstr '&SYSDATE Serial (W5100) 1.0'
+info	cstr '&SYSDATE Modem (W5100) 1.0'
 	msb off
 
 connect_speed_str cstr '19200'
@@ -638,12 +618,6 @@ connect_speed_str cstr '19200'
 amperct
 	dc.b 'MSET',0
 	dc.b -1
-
-mult_table
-;	dc.b 0,10,20,30,40,50,60,70,80,90
-;	dc.b 100,110,120,130,140,150,160,170,180,190
-;	dc.b 200,210,220,230,240,250
-
 
 
 tt_id	dc.b 0
@@ -662,7 +636,7 @@ port	dc.w 0
 lport	dc.b $00
 
 tmp	dc.w 0
-ir	dc.b 0
+int_flag	dc.b 0
 end
 	endp
 	end

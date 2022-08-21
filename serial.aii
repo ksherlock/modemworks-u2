@@ -149,18 +149,18 @@ get_dcd
 	lda #Sn_SR
 	sta $c0b6
 	lda $c0b7
-	cmp #Sn_SR_SOCK_CLOSE_WAIT
-	beq @d
+;	cmp #Sn_SR_SOCK_CLOSE_WAIT
+;	beq @d
 	cmp #Sn_SR_SOCK_ESTABLISHED
 	bne @nocarrier
 
 	sec
 	rts
-@d
-	lda #Sn_CR
-	sta $c0b6
-	lda #Sn_CR_DISCON
-	sta $c0b7
+;@d
+;	lda #Sn_CR
+;	sta $c0b6
+;	lda #Sn_CR_DISCON
+;	sta $c0b7
 @nocarrier
 	clc
 	rts
@@ -578,7 +578,7 @@ write_buffer
 	sta $c0b7
 	iny	
 	cpy prmtbl
-	bne	@ploop
+	bne @ploop
 
 @done
 	jmp write_tx_wr

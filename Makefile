@@ -1,6 +1,6 @@
 
 .PHONY: all
-all: dhcp.omm serial.omm
+all: dhcp.omm serial.omm modem.omm
 
 # dhcp.omf : dhcp.aii W5100.equ
 
