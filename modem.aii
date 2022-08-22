@@ -287,6 +287,8 @@ dial_number
 	ldy #0
 	ldx #0
 @loop
+	cpx #4
+	bcs @err
 	jsr get_num
 	pha
 	; lda tmp+1
@@ -294,22 +296,23 @@ dial_number
 	lda tmp
 	sta ip,x
 	inx
+	iny
 	pla
-	cpx #4
-	bcs @err
 
 	cmp #'.'
 	beq @loop
 	cmp #':'
 	bne @err
 
+	cpx #4
+	bne @err
 ; port
 	jsr get_num
 	cmp #0
 	bne @err
-	lda tmp
-	sta port
 	lda tmp+1
+	sta port
+	lda tmp
 	sta port+1
 
 
