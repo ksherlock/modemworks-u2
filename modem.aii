@@ -181,11 +181,23 @@ listen_or_connect
 
 	lda #Sn_PORT
 	sta $c0b6
+
+	cpx #Sn_CR_LISTEN
+	beq @listen
+
 	lda rndseed
 	sta $c0b7
 	inc lport
 	lda lport
 	sta $c0b7
+	bra @cr
+
+@listen
+	lda #(6502)>>8
+	sta $c0b7
+	lda #6502
+	sta $c0b7
+@cr
 
 	lda #Sn_CR
 	sta $c0b6
@@ -474,14 +486,15 @@ handle_connect_cb
 
 *
 * called by & PICKUP [0]
-*
+* 
 answer_line
 * pick up the phone and send answer carrier tone
 	stz mode
-answer_common
+	rts
+;answer_common
 	; clear the connect int. bit [????]
-	ldx #Sn_IR_CON
-	jmp store_x_to_IR
+;	ldx #Sn_IR_CON
+;	jmp store_x_to_IR
 
 *
 * Called by & PICKUP 1
@@ -489,12 +502,16 @@ answer_common
 orig_ans_line
 	lda #1
 	sta mode
-	bra answer_common
+	rts
+;	bra answer_common
 
 *
 * called by & HANGUP
 *
 hang_up
+; TODO - should disconn then wait 2s for
+; peer to disconnect as well.
+
 	jmp listen
 
 
