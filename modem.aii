@@ -431,14 +431,20 @@ handle_connect
 	bcc @to
 @check
 	lda int_flag
+	bmi @esc
 ;	bit #Sn_IR_TIMEOUT
 ;	bne @to
 	bit #Sn_IR_CON
 	bne @ok
-	; ????
+
 @to
+	lda #2 ; no connection
+	dc.b $2c ; bit hide
+@esc	lda #1 ; canceled
+	sta $c010
+	pha
 	jsr listen
-	lda #2 ; no connection.
+	pla
 	rts
 
 @ok
@@ -456,7 +462,13 @@ handle_connect_cb
 	lda $c0b7
 	sta int_flag
 	and #(Sn_IR_CON or Sn_IR_TIMEOUT)
-	cmp #1
+	bne @ex
+
+@kbd
+	lda $c000
+	and #$80
+	tsb int_flag
+@ex	cmp #1
 	rts
 
 
