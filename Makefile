@@ -5,6 +5,9 @@ all: dhcp.omm serial.omm modem.omm
 # dhcp.omf : dhcp.aii W5100.equ
 
 
+loader : loader.b
+	iix mdbasic loader.b -o loader
+
 %.omm : %.omf
 	mpw makebiniigs -org \$$0ff0 -t \$$2b -at \$$8006 -p -s  -o $@ $^
 
