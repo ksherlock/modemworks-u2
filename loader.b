@@ -24,7 +24,7 @@
 	&load get "modules/Console"
 	&load get "modules/Terminal"
 
-	& load get "modules/Compat"
+'	& load get "modules/Compat"
 
 	print "Initializing Uthernet..."
 	' initialize "modem" in slot 3.

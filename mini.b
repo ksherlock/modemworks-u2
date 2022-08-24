@@ -15,141 +15,141 @@
 	'*  -- MORGAN DAVIS --  *
 	'*                      *
 	'************************
+
+#include <ModemWorks.h>
+#include <AmperWorks.h>
+
+#define CountCell 0
+#define PasswordCell 1
+
 	'^J^JSET UP EVENT TRAPPING^J
-	onerr goto _1080_
-	& when not on line goto _410_
+	onerr goto ErrorHandler
+	& on hangup  goto HangupHandler
+
 	'^J^JDECLARE VARIABLES^J
-	msg$ = "MESSAGES"
-	' NAME OF MAILBOX FILE
-	hello$ = "HELLO"
-	'NAME OF 'HELLO' FILE
-	o = 0
-	a = 1
-	b = 2
-	c = 3
-	d = 4
-	d$ = chr$ (d)
-	c$ = chr$ (13)
+	msg$ = "MESSAGES" ' NAME OF MAILBOX FILE
+	hello$ = "HELLO" 'NAME OF 'HELLO' FILE
+	cr$ = chr$ (13)
 	y$(0) = "No"
 	y$(1) = "Yes"
+
 	'^J^JSET UP SCREEN AND I/O^J
-	& scrn( 2)
-	& fn o,car
-	if car then 
-		goto _640_
-	endif
+	& scrn(2)
+	& fn fnOnline,car
+	on car goto Online
 	home 
 	& read "Enter today's entry password: ",a$
 	& ucase(a$)
-	& store a$ to a
+	& store a$ to PasswordCell
 
-_410_:
+HangupHandler:
+	'CARRIER LOSS ENTRY POINT
 	& pop 
 	& hangup
-	& clear 
-	'CARRIER LOSS ENTRY POINT
+	& clear
+
+	'I/O FOR CONSOLE ONLY
 	& pr 3
 	& in 3
-	'I/O FOR CONSOLE ONLY
-	& int = c,27
-	'  CTRL-C, ESC
-	& timer(300)
-	'APPROX. 5 MINUTE TIMEOUT DELAY
+	& int = 3,27 ' CTRL-C, ESC
+	& timer(300) 'APPROX. 5 MINUTE TIMEOUT DELAY
 	& timer stop 
-	& int stop 
-	' INITIALLY TURNED OFF
-	& restore 0 to a$
+	& int stop  ' INITIALLY TURNED OFF
+	& restore CountCell to a$
 	cl = val (a$)
-	print c$c$"MW: Calls "cl
+	print "^M^MMW: Calls " cl
 	'^J^JWAIT FOR CALL OR KEYPRESS^J
 	print "MW: Waiting ";
-	& wait for call ,i
-	on i goto _610_
-	print "-keyboard"c$
+	& wait for call , i
+	on i goto AnswerCall
+	print "-keyboard^M"
 	print "View your messages";
-	gosub _1040_
+	gosub GetYN
 	on not y goto _580_
 	if y then 
 		print 
 		& list msg$
 	endif
 	print "Delete your mail";
-	gosub _1040_
+	gosub GetYN
 	if y then 
-		print d$"DELETE"msg$
+		print "^DDELETE"msg$
 	endif
 
 _580_:
-	print c$"Do you want to log in";
-	gosub _1040_
-	on y goto _730_
+	print "^MDo you want to log in";
+	gosub GetYN
+	on y goto Help
 	end 
-	'^J^JWAIT FOR CONNECT AND GET PASSWORD^J
 
-_610_:
+
+	'^J^JWAIT FOR CONNECT AND GET PASSWORD^J
+AnswerCall:
 	print "-ring ";
 	& pickup
 	& wait for carrier,result
-	on result > 0 goto _410_
+	on result > 0 goto HangupHandler
 	print "-online ";
 
-_640_:
-	& chk on 
+Online:
 	'TURN CARRIER CHECKING ON
+	& chk on 
 	& timer on 
-	& on int goto _410_
+	& on int goto HangupHandler
 	& int on 
 	& pr 2
 	& in 2
-	print c$
-	print "Login please: ";
+	print "^MLogin please: ";
 	& pr 1
 	& read lg$
 	& pr 2
 	print 
 	& ucase(lg$)
-	& restore 1 to a$
+	& restore PasswordCell to a$
 	& ucase(a$)
 	if a$ < > lg$ then 
-		print c$"Sorry.  ";
+		print "^MSorry.  ";
 		goto _850_
 	endif
-	'^J^JLOG CALLER IN^J
-	gosub _975_
-	& time(t$)
-	print "Today is "t$c$
-	print "You are caller #"cl;c$
-	& store str$ (cl + a) to 0
-	& on int goto _800_
 
-_730_:
-	print "Commands are:"c$
+	'^J^JLOG CALLER IN^J
+	gosub PrintHello
+	& time(t$)
+	print "Today is " t$ cr$
+	print "You are caller #" cl ; cr$
+	& store str$ (cl + 1) to CountCell
+	& on int goto ReadCommand
+
+Help:
+	print "Commands are:^M"
 	print "(B)ye       -- Hangup and leave"
 	print "(E)nter     -- Enter a message"
 	print "(V)iew      -- View the 'hello' file"
 	print "(C)hat      -- Enter a chat loop"
 	print "(?) or (H)  -- This list of commands"
-	'^J^JGET A BBS COMMAND^J
 
-_800_:
+
+	'^J^JGET A BBS COMMAND^J
+ReadCommand:
 	& pop 
-	print c$">>";
+	print "^M>>";
 	get a$
 	& ucase(a$)
-	on a$ = c$ goto _800_
+	on a$ = cr$ goto ReadCommand
 	& pos ("BEVC?HM",a$),p
 	if not p then 
 		print "Eh?";
-		goto _800_
+		goto ReadCommand
 	endif
-	& str$ (b,8)
-	on p gosub _840_,_870_,_970_,_990_,_730_,_730_,_1020_
-	goto _800_
-	'^J^JGOODBYE ROUTINE^J
+	& hlin 2,8 ' backspace, backspace
+	on p gosub Bye,Enter,View,Chat,Help,Help,Mail
+	goto ReadCommand
 
-_840_:
+
+	'^J^JGOODBYE ROUTINE^J
+Bye:
 	print "Bye";
-	gosub _1040_
+	gosub GetYN
 	if not y then 
 		return 
 	endif
@@ -157,56 +157,61 @@ _840_:
 _850_:
 	& time(t$)
 	print "It's "t$".  Goodbye...  ";
-	goto _410_
-	'^J^JENTER A MESSAGE ROUTINE^J
+	goto HangupHandler
 
-_870_:
-	print "Enter Msg"c$
+
+	'^J^JENTER A MESSAGE ROUTINE^J
+Enter:
+	print "Enter Msg^M"
 	& read "Your name: ",from$
 	if from$ = "" then 
 		return 
 	endif
-	print c$"Begin Message, Type / alone when done:"
+	print "^MBegin Message, Type / alone when done:"
 	& time(t$)
-	print d$"APPEND"msg$
+	print "^DAPPEND"msg$
 	print "From: "from$
-	print "Date: "t$c$
+	print "Date: "t$cr$
 	& rept
 	& read a$
 	if a$ < > "/" then 
 		print a$
 	endif
 	& until(a$ = "/")
-	print "------"c$
-	print d$"CLOSE"
-	print c$"Your message has been saved."
-	return 
+	print "------^M"
+	print "^DCLOSE"
+	print "^MYour message has been saved."
+	return
+
+
 	'^J^JVIEW A FILE ROUTINE^J
+View:
+	print "View HELLO file...^M"
 
-_970_:
-	print "View HELLO file..."c$
-
-_975_:
+PrintHello:
 	& list hello$
-	return 
-	'^J^JCHAT LOOP ROUTINE^J
+	return
 
-_990_:
-	print "Chat (Type / alone to exit)"c$
+
+	'^J^JCHAT LOOP ROUTINE^J
+Chat:
+	print "Chat (Type / alone to exit)^M"
 	i$ = ""
 	& rept
 	& read (79,i$),a$
 	& until(a$ = "/")
 	return 
-	'^J^JHIDDEN READ MAIL FEATURE^J
 
-_1020_:
-	print "Mail"c$
+
+	'^J^JHIDDEN READ MAIL FEATURE^J
+Mail:
+	print "Mail^M"
 	& list msg$
 	return 
-	'^J^JGET A YES/NO RESPONSE^J
 
-_1040_:
+
+	'^J^JGET A YES/NO RESPONSE^J
+GetYN:
 	print "? (y/n) ";
 	& rept
 	get a$
@@ -214,16 +219,17 @@ _1040_:
 	& until(a$ = "Y" or a$ = "N")
 	y = a$ = "Y"
 	print y$(y)
-	return 
-	'^J^JERROR HANDLING ROUTINE^J
+	return
 
-_1080_:
+
+	'^J^JERROR HANDLING ROUTINE^J
+ErrorHandler:
 	& onerr e,l
-	print chr$ (4)"CLOSE"
+	print "^DCLOSE"
 	'CLOSE ANY OPEN FILES
 	if e = 6 or e = 7 then 
 		print "File not on disk"
-		goto _800_
+		goto ReadCommand
 	endif
 	print "Error "e" at "l
-	goto _800_
+	goto ReadCommand
