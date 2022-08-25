@@ -215,7 +215,10 @@ listen
 * called by & SLOT (modem-slot)
 *
 init
+* Input:
 * prmtbl[0] = slot
+* Output:
+* A = 0 on success, 1 on failure. [MWTR is backwards]
 
 	; should store slot ptrs so it's not hardcoded.
 
@@ -223,13 +226,17 @@ init
 * Called by &USR 6
 *
 reset
+* Output:
+* A = 0 on success, 1 on failure. [MWTR is backwards]
+
 	jsr dhcp
 	bcc @ok
 	lda #1
 	rts
 
 @ok
-	lda #1
+	jsr listen
+	lda #0
 	rts
 
 exit

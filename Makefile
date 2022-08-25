@@ -7,6 +7,7 @@ all: dhcp.omm serial.omm modem.omm
 
 loader : loader.b
 	iix mdbasic loader.b -o loader
+
 mini.bbs : mini.b
 	iix mdbasic mini.b -o mini.bbs
 
