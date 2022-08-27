@@ -10,6 +10,7 @@
 	include 'OMM.equ'
 	include 'TimeTool.equ'
 	include 'W5100.equ'
+	include 'dhcp.equ'
 
 	macro
 &l	cstr &x
@@ -34,14 +35,7 @@ chkcls	equ $deb8 ; matches and consumes ')' or generates a syntax error
 chkopn  equ $debb ; matches and consumes '(' or generates a syntax error
 getbyte	equ $e6f8
 
-DHCP_DISCOVER	equ 1
-DHCP_OFFER	equ 2
-DHCP_REQUEST	equ 3
-DHCP_DECLINE	equ 4
-DHCP_ACK	equ 5
-DHCP_NACK	equ 6
-DHCP_RELEASE	equ 7
-DHCP_INFORM	equ 8
+
 
 Header	proc
 
@@ -100,18 +94,63 @@ do_user
 	tax
 	jmp (user_dispatch,x)
 
+sta_loop
+; stores A to $c0b7 Y times.
+@loop
+	sta $c0b7
+	dey
+	bne @loop
+	rts
+
+
+
+
+amper_ip
+	; & ip get -> returns address info
+	; & ip var1$, var2$, var3$, var4$, var5$
+	; set the ip address, netmask, gateway, dns server 
+
+amper_bootp
+	; & bootp , var
+	; sets var = 1 on success, 0 on failure.
+	; sends BOOTP message to acquire ip address, etc
+	; DHCP is built on top of bootp; the bootp request
+	; is essentially DHCP without the message-type option.
+
+
+	lda #$80
+	sta bootp
+	jsr dhcp_common
+	bra handle_rv
+
+
 amper_dhcp
+	; & dhcp end -> release
+	; & dhcp resume -> request [renew lease]
+	; & dhcp [new] -> discover / request
+
 	; &dhcp , var
 	; sets var = 1 on success, 0 on failure.
 
+
+	; n.b. - for renewal, a request is sent, unicast,
+	; to the dhcp server.  this means the dhcp server 
+	; must be known.
+
+	stz bootp
+
 	jsr dhcp_common ; returns carry clear/set
+
+handle_rv
+	; handle a return value
+
 	lda #1
 	bcc @ok
 	lda #0
-
 @ok
 	sta a1
 	stz a1+1
+
 
 	jsr chrgot
 	beq @eol
@@ -123,6 +162,7 @@ amper_dhcp
 	jmp OMMVEC
 
 @eol	rts
+
 
 
 dhcp_common
@@ -210,7 +250,13 @@ discover
 	bra @retry
 	; todo -- should call read_message until RSR == 0
 
+
 request
+	; if this is a bootp message, we are now finished
+	bit bootp
+	bmi @ok
+
+
 	jsr send_dhcp_request
 	jsr wait_2_seconds
 	bcs @check
@@ -266,45 +312,48 @@ data_avail
 
 
 
-	
+send_bootp
+
+	; should store payload address / length in variables,
+	; unify code...
+
+	jsr send_dhcp_common
+	ldy #0
+@dloop
+	lda bootp_req_pl,y
+	sta $c0b7
+	iny
+	cpy #bootp_req_pl_len
+	bne @dloop
+
+	; 0-pad to 300 bytes
+
+send_bootp_request
+
+	lda bootp_req_pl_len
+	sta lowtr
+	lda a_bootp_req_pl
+	sta lowtr+1
+	lda a_bootp_req_pl+1
+	sta lowtr+2
+
+	jmp send_dhcp_common
+
 
 send_dhcp_discover
 
-	jsr send_dhcp_common
 
-	; dhcp data
-	ldy #0
-@dloop
-	lda dhcp_disc_pl,y
-	sta $c0b7
-	iny
-	cpy #dhcp_disc_pl_len
-	bne @dloop
+	lda dhcp_disc_pl_len
+	sta lowtr
+	lda a_dhcp_disc_pl
+	sta lowtr+1
+	lda a_dhcp_disc_pl+1
+	sta lowtr+2
 
-;@len	equ dhcp_disc_pl_len+236
+	jmp send_dhcp_common
 
-	lda #04
-	sta $c0b5
-	lda #Sn_TX_WR
-	sta $c0b6
 
-	clc
-	lda a1
-	adc #(dhcp_disc_pl_len+236)
-	sta a1
-	lda a1+1
-	adc #(dhcp_disc_pl_len+236)>>8
-	sta a1+1
 
-	sta $c0b7
-	lda a1
-	sta $c0b7
-
-	lda #Sn_CR
-	sta $c0b6
-	lda #Sn_CR_SEND_MAC
-	sta $c0b7
-	rts
 
 send_dhcp_request
 
@@ -316,39 +365,17 @@ send_dhcp_request
 	dey
 	bpl @iloop
 
-	jsr send_dhcp_common
 
-	; dhcp data
-	ldy #0
-@dloop
-	lda dhcp_req_pl,y
-	sta $c0b7
-	iny
-	cpy #dhcp_req_pl_len
-	bne @dloop
+	lda dhcp_req_pl_len
+	sta lowtr
+	lda dhcp_req_pl
+	sta lowtr+1
+	lda dhcp_req_pl+1
+	sta lowtr+2
 
-	lda #04
-	sta $c0b5
-	lda #Sn_TX_WR
-	sta $c0b6
+	jmp send_dhcp_common
 
-	clc
-	lda a1
-	adc #(dhcp_req_pl_len+236)
-	sta a1
-	lda a1+1
-	adc #(dhcp_req_pl_len+236)>>8
-	sta a1+1
 
-	sta $c0b7
-	lda a1
-	sta $c0b7
-
-	lda #Sn_CR
-	sta $c0b6
-	lda #Sn_CR_SEND_MAC
-	sta $c0b7
-	rts
 
 send_dhcp_common
 
@@ -379,10 +406,8 @@ send_dhcp_common
 
 	; 0-pad until mac address @28
 	ldy #28-bootp_hdr_len
-@zloop
-	stz $c0b7
-	dey
-	bne @zloop
+	lda #0
+	jsr sta_loop
 
 	; mac address
 	ldy #0
@@ -395,10 +420,57 @@ send_dhcp_common
 
 	; 0-pad until cookie at 236
 	ldy #236-34
-@zloop2
-	stz $c0b7
-	dey
-	bne @zloop2
+	lda #0
+	jsr sta_loop
+
+; now copy cookie / options
+; lowtr = length
+; lowtr+1/2 = ptr
+
+	; dhcp data
+	ldy #0
+@dloop
+	lda (lowtr+1),y
+	sta $c0b7
+	iny
+	cpy lowtr
+	bne @dloop
+
+	; 0-pad to 300 bytes.
+	lda #300-236
+	sec
+	sbc lowtr
+	tay
+	lda #0
+	jsr sta_loop
+
+
+	lda #04
+	sta $c0b5
+	lda #Sn_TX_WR
+	sta $c0b6
+
+	clc
+	lda a1
+	adc #(300)
+	sta a1
+	lda a1+1
+	adc #(300)>>8
+	sta a1+1
+
+	sta $c0b7
+	lda a1
+	sta $c0b7
+
+	lda #Sn_CR
+	sta $c0b6
+	lda #Sn_CR_SEND_MAC
+	sta $c0b7
+	rts
+
+
+
+
 
 	rts
 
@@ -493,10 +565,18 @@ rm_exit
 rm_ok
 
 	; check the xid - offset 4
+check_msg_typ
+;	lda #8
+;	jsr set_rx_ptr
+	lda $c0b7
+	cmp #BOOTP_REPLY ; boot reply
+	bne rm_bad
 
 check_xid
-	lda #8+4
-	jsr set_rx_ptr
+	ldx #3
+	jsr skipx
+;	lda #8+4
+;	jsr set_rx_ptr
 	ldy #0
 @loop	lda $c0b7
 	cmp xid,y
@@ -699,22 +779,43 @@ immed
 a_info	dc.w info
 a_data_avail dc.w data_avail
 
+a_dhcp_disc_pl
+	dc.w dhcp_disc_pl
+a_dhcp_req_pl
+	dc.w dhcp_req_pl
+a_bootp_req_pl
+	dc.w bootp_req_pl
+
 option_dispatch
 	dc.w option_1,option_3,option_6,option_53,option_54
 
 
 amper_dispatch
 	dc.w amper_dhcp
+	dc.w amper_bootp
+	dc.w amper_ip
 
 user_dispatch
 	; nothing yet!
 
 	dc.w $0000 ; end immed
 
-data
+
+	msb on
+info	cstr '&SYSDATE DHCP (W5100) 1.0'
+	msb off
+
+amperct
+	dc.b 'BOOTP',$00
+	dc.b 'DHCP',$00
+	dc.b 'IP',$00
+	dc.b -1
+
+
 
 tt_id	dc.b 0
 retry	dc.b 0
+bootp	dc.b 0
 
 
 dhcp_msg_type	dc.b 0
@@ -734,38 +835,42 @@ mac	dc.b $00,$08,$dc,$a2,$a2,$a2
 bootp_hdr ; boot req, ethernet, hw len 6, 0 hops
 	dc.b $01,$01,$06,$00
 xid	dc.b $12,$34,$56,$78 ; xid
-	dc.b $00,$00,$80,00 ; seconds elapsed, flags (broadcast)
+elapsed	dc.b $00,$00
+	dc.b $80,00 ; seconds elapsed, flags (broadcast)
 bootp_hdr_len equ *-bootp_hdr
 
-dhcp_disc_pl ; cookie + discover + parm list
-	dc.b $63,$82,$53,$63,$35,$01,$01,$37
-	dc.b $04,$01,$03,$06,$1a,$ff
+dhcp_disc_pl
+	dc.b $63,$82,$53,$63 ; cookie
+	dc.b $35,$01,$01 ; dhcp discover
+	dc.b $37,$04,$01,$03,$06,$1a ; parm list
+	dc.b $ff ; end of options
 dhcp_disc_pl_len equ *-dhcp_disc_pl
 
 
 dhcp_req_pl ; cookie + req + parm list
 
-cookie	dc.b $63,$82,$53,$63
-	dc.b $35,$01,$03,$37
-	dc.b $04,$01,$03,$06,$1a,$39,$02,$05
-	dc.b $b4,$36,$04
+cookie	dc.b $63,$82,$53,$63 ; cookie
+	dc.b $35,$01,$03 ; dhcp request
+	dc.b $37,$04,$01,$03,$06,$1a ; parm list
+	dc.b $39,$02,$05,$b4 ; max dhcp message size
+	dc.b $36,$04 ; dhcp server id
 req_server_ip
 	dc.b $ff,$ff,$ff,$ff ; dhcp server id
-	dc.b $32,$04
+	dc.b $32,$04 ; requested ip
 req_ip
-	dc.b $ff,$ff,$ff,$ff ; req. ip
-	dc.b $ff
+	dc.b $ff,$ff,$ff,$ff
+	dc.b $ff ; end of options
 dhcp_req_pl_len equ *-dhcp_req_pl
 
 
+bootp_req_pl
+	dc.b $63,$82,$53,$63 ; cookie
+	dc.b $ff ; end of options
+bootp_req_pl_len equ *-bootp_req_pl
 
-	msb on
-info	cstr '&SYSDATE DHCP (W5100) 1.0'
-	msb off
 
-amperct
-	dc.b 'DHCP',$00
-	dc.b -1
+
+
 
 
 end

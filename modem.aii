@@ -770,38 +770,16 @@ data_avail
 
 send_dhcp_discover
 
-	jsr send_dhcp_common
+	lda dhcp_disc_pl_len
+	sta lowtr
+	lda a_dhcp_disc_pl
+	sta lowtr+1
+	lda a_dhcp_disc_pl+1
+	sta lowtr+2
 
-	; dhcp data
-	ldy #0
-@dloop
-	lda dhcp_disc_pl,y
-	sta $c0b7
-	iny
-	cpy #dhcp_disc_pl_len
-	bne @dloop
+	bra send_dhcp_common
 
-;@len	equ dhcp_disc_pl_len+236
 
-	lda #04
-	sta $c0b5
-	lda #Sn_TX_WR
-	sta $c0b6
-
-	clc
-	lda a1
-	adc #(dhcp_disc_pl_len+236)
-	sta a1
-	lda a1+1
-	adc #(dhcp_disc_pl_len+236)>>8
-	sta a1+1
-
-	sta $c0b7
-	lda a1
-	sta $c0b7
-
-	ldx #Sn_CR_SEND_MAC
-	jmp command_x
 
 send_dhcp_request
 
@@ -813,36 +791,16 @@ send_dhcp_request
 	dey
 	bpl @iloop
 
-	jsr send_dhcp_common
 
-	; dhcp data
-	ldy #0
-@dloop
-	lda dhcp_req_pl,y
-	sta $c0b7
-	iny
-	cpy #dhcp_req_pl_len
-	bne @dloop
+	lda dhcp_req_pl_len
+	sta lowtr
+	lda dhcp_req_pl
+	sta lowtr+1
+	lda dhcp_req_pl+1
+	sta lowtr+2
 
-	lda #04
-	sta $c0b5
-	lda #Sn_TX_WR
-	sta $c0b6
+	bra send_dhcp_common
 
-	clc
-	lda a1
-	adc #(dhcp_req_pl_len+236)
-	sta a1
-	lda a1+1
-	adc #(dhcp_req_pl_len+236)>>8
-	sta a1+1
-
-	sta $c0b7
-	lda a1
-	sta $c0b7
-
-	ldx #Sn_CR_SEND_MAC
-	jmp command_x
 
 send_dhcp_common
 
@@ -889,6 +847,44 @@ send_dhcp_common
 	ldy #236-34
 	lda #0
 	jmp sta_loop
+
+
+	; copy dhcp options
+	ldy #0
+@dloop
+	lda (lowtr+1),y
+	sta $c0b7
+	iny
+	cpy lowtr
+	bne @dloop
+
+	; 0-pad to 300 bytes
+	lda #300-236
+	sec
+	sbc lowtr
+	tay
+	lda #0
+	jsr sta_loop
+
+	lda #04
+	sta $c0b5
+	lda #Sn_TX_WR
+	sta $c0b6
+
+	clc
+	lda a1
+	adc #(300)
+	sta a1
+	lda a1+1
+	adc #(300)>>8
+	sta a1+1
+
+	sta $c0b7
+	lda a1
+	sta $c0b7
+
+	ldx #Sn_CR_SEND_MAC
+	jmp command_x
 
 
 
@@ -1189,11 +1185,17 @@ dhcp_commit
 a_info	dc.w info
 a_connect_speed_str
 	dc.w connect_speed_str
+
 a_handle_connect_cb
 	dc.w handle_connect_cb
 
 a_data_avail dc.w data_avail
 
+a_dhcp_disc_pl
+	dc.w dhcp_disc_pl
+
+a_dhcp_req_pl
+	dc.w dhcp_req_pl
 
 user_dispatch
 	dc.w init
@@ -1282,17 +1284,20 @@ xid	dc.b $12,$34,$56,$78 ; xid
 bootp_hdr_len equ *-bootp_hdr
 
 dhcp_disc_pl ; cookie + discover + parm list
-	dc.b $63,$82,$53,$63,$35,$01,$01,$37
-	dc.b $04,$01,$03,$06,$1a,$ff
+	dc.b $63,$82,$53,$63
+	dc.b $35,$01,$01
+	dc.b $37,$04,$01,$03,$06,$1a
+	dc.b $ff
 dhcp_disc_pl_len equ *-dhcp_disc_pl
 
 
 dhcp_req_pl ; cookie + req + parm list
 
 cookie	dc.b $63,$82,$53,$63
-	dc.b $35,$01,$03,$37
-	dc.b $04,$01,$03,$06,$1a,$39,$02,$05
-	dc.b $b4,$36,$04
+	dc.b $35,$01,$03
+	dc.b $37,$04,$01,$03,$06,$1a
+	dc.b $39,$02,$05,$b4
+	dc.b $36,$04
 req_server_ip
 	dc.b $ff,$ff,$ff,$ff ; dhcp server id
 	dc.b $32,$04
