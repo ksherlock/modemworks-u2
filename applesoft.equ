@@ -1,0 +1,116 @@
+
+chrget	equ $b1
+chrgot	equ $b7
+chkcom	equ $debe ; matches and consumes ',' or generates a syntax error.
+chkcls	equ $deb8 ; matches and consumes ')' or generates a syntax error
+chkopn  equ $debb ; matches and consumes '(' or generates a syntax error
+getbyte	equ $e6f8
+
+
+tkEND	equ $80		; END
+tkFOR	equ $81		; FOR
+tkNEXT	equ $82		; NEXT
+tkDATA	equ $83		; DATA
+tkINPUT	equ $84		; INPUT
+tkDEL	equ $85		; DEL
+tkDIM	equ $86		; DIM
+tkREAD	equ $87		; READ
+tkGR	equ $88		; GR
+tkTEXT	equ $89		; TEXT
+tkPR	equ $8a		; PR #
+tkIN	equ $8b		; IN #
+tkCALL	equ $8c		; CALL
+tkPLOT	equ $8d		; PLOT
+tkHLIN	equ $8e		; HLIN
+tkVLIN	equ $8f		; VLIN
+tkHGR2	equ $90		; HGR2
+tkHGR	equ $91		; HGR
+tkHCOLOR	equ $92		; HCOLOR=
+tkHPLOT	equ $93		; HPLOT
+tkDRAW	equ $94		; DRAW
+tkXDRAW	equ $95		; XDRAW
+tkHTAB	equ $96		; HTAB
+tkHOME	equ $97		; HOME
+tkROT	equ $98		; ROT
+tkSCALE	equ $99		; SCALE=
+tkSHLOAD	equ $9a		; SHLOAD
+tkTRACE	equ $9b		; TRACE
+tkNOTRACE	equ $9c		; NOTRACE
+tkNORMAL	equ $9d		; NORMAL
+tkINVERSE	equ $9e		; INVERSE
+tkFLASH	equ $9f		; FLASH
+tkCOLOR	equ $a0		; COLOR=
+tkPOP	equ $a1		; POP
+tkVTAB	equ $a2		; VTAB
+tkHIMEM	equ $a3		; HIMEM:
+tkLOMEM	equ $a4		; LOMEM:
+tkONERR	equ $a5		; ONERR
+tkRESUME	equ $a6		; RESUME
+tkRECALL	equ $a7		; RECALL
+tkSTORE	equ $a8		; STORE
+tkSPEED	equ $a9		; SPEED=
+tkLET	equ $aa		; LET
+tkGOTO	equ $ab		; GOTO
+tkRUN	equ $ac		; RUN
+tkIF	equ $ad		; IF
+tkRESTORE	equ $ae		; RESTORE
+tkAMPERSAND	equ $af		; &
+tkGOSUB	equ $b0		; GOSUB
+tkRETURN	equ $b1		; RETURN
+tkREM	equ $b2		; REM
+tkSTOP	equ $b3		; STOP
+tkON	equ $b4		; ON
+tkWAIT	equ $b5		; WAIT
+tkLOAD	equ $b6		; LOAD
+tkSAVE	equ $b7		; SAVE
+tkDEF	equ $b8		; DEF
+tkPOKE	equ $b9		; POKE
+tkPRINT	equ $ba		; PRINT
+tkCONT	equ $bb		; CONT
+tkLIST	equ $bc		; LIST
+tkCLEAR	equ $bd		; CLEAR
+tkGET	equ $be		; GET
+tkNEW	equ $bf		; NEW
+tkTAB	equ $c0		; TAB
+tkTO	equ $c1		; TO
+tkFN	equ $c2		; FN
+tkSPC	equ $c3		; SPC(
+tkTHEN	equ $c4		; THEN
+tkAT	equ $c5		; AT
+tkNOT	equ $c6		; NOT
+tkSTEP	equ $c7		; STEP
+tkPLUS	equ $c8		; +
+tkMINUS	equ $c9		; -
+tkSTAR	equ $ca		; *
+tkSLASH	equ $cb		; /
+tkSEMI	equ $cc		; ;
+tkAND	equ $cd		; AND
+tkOR	equ $ce		; OR
+tkGT	equ $cf		; >
+tkEQ	equ $d0		; =
+tkLT	equ $d1		; <
+tkSGN	equ $d2		; SGN
+tkINT	equ $d3		; INT
+tkABS	equ $d4		; ABS
+tkUSR	equ $d5		; USR
+tkFRE	equ $d6		; FRE
+tkSCRN	equ $d7		; SCRN (
+tkPDL	equ $d8		; PDL
+tkPOS	equ $d9		; POS
+tkSQR	equ $da		; SQR
+tkRND	equ $db		; RND
+tkLOG	equ $dc		; LOG
+tkEXP	equ $dd		; EXP
+tkCOS	equ $de		; COS
+tkSIN	equ $df		; SIN
+tkTAN	equ $e0		; TAN
+tkATN	equ $e1		; ATN
+tkPEEK	equ $e2		; PEEK
+tkLEN	equ $e3		; LEN
+tkSTR	equ $e4		; STR
+tkVAL	equ $e5		; VAL
+tkASC	equ $e6		; ASC
+tkCHR	equ $e7		; CHR$
+tkLEFT	equ $e8		; LEFT$
+tkRIGHT	equ $e9		; RIGHT$
+tkMID	equ $ea		; MID$

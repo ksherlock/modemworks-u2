@@ -11,6 +11,7 @@
 	include 'ConsoleTool.equ'
 	include 'W5100.equ'
 	include 'dhcp.equ'
+	include 'applesoft.equ'
 
 
 *
@@ -119,12 +120,550 @@ do_user
 
 
 do_ampr
+	tya
+	asl a
+	tax
+	jmp (amper_dispatch,x)
+
+
+omm_get_str
+	ldy #OMM_GETSTR
+	dc.b $2c ; bit absolute
+omm_put_str
+	ldy #OMM_PUTSTR
+call_omm
+	ldx #OMM_ID
+	jmp OMMVEC
+
+
+
+
+
 ; & mset address
-ampr_mset
+amper_mset
 	jmp $d995 ; data - skips to next : or EOL.
 ;	jsr frmnum
 ;	jsr getadr
 	rts
+
+amper_mac
+; & mac (strexpr)
+; & mac get strvar$
+	jsr chrgot
+	cmp #tkGET
+	beq do_mac_get
+; set the mac
+	jsr chkopn
+	jsr omm_get_str
+	jsr chkcls
+	; lowtr = length,
+	; lowtr+1/2 = string ptr
+
+	jsr parse_mac
+	bcs @bad
+
+	lda #0
+	sta $c0b5
+	lda #SHAR
+	sta $c0b6
+	ldy #0
+@loop
+	lda mac,y
+	sta $c0b7
+	iny
+	cpy #6
+	bne @loop
+	rts
+
+
+@bad
+	jmp $e199 ; illegal quantity error.
+
+
+
+do_mac_get
+; & mac get strvar$
+; n.b. $200 input buffer is in use in direct mode.
+
+	jsr chrget
+	lda #6*2+5
+	sta lowtr
+	lda a_space
+	sta lowtr+1
+	lda a_space+1
+	sta lowtr+2
+	jsr mac_to_string
+	jmp omm_put_str
+
+
+mac_to_string
+; read mac address, write to space.
+	lda #0
+	sta $c0b5
+	lda #SHAR
+	sta $c0b6
+
+	ldy #0
+@mloop
+	lda $c0b7
+	sta mac,y
+	iny
+	cpy #6
+	bcc @mloop
+
+	; y = mac offset
+	; x = space offset
+	ldy #0
+	ldx #0
+@loop
+	phx
+
+	lda mac,y
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+	tax
+	lda hex,x
+	plx
+	sta space+0,x
+
+	phx
+
+	lda mac,y
+	and #$0f
+	tax
+	lda hex,x
+	plx
+	sta space+1,x
+	lda #':'
+	sta space+2,x
+	inx
+	inx
+	inx
+
+	iny
+	cpy #6*3
+	bcc @loop
+	rts
+
+
+ip_to_string
+; write ip to string to space
+; returns string length in x.
+
+	ldy #0
+	ldx #0
+
+@loop
+	lda ip,y
+	phx
+	phy
+	jsr to_bcd
+	ply
+	plx
+	lda tmp+1
+	bne @3
+	lda tmp
+	and #$f0
+	bne @2
+	bra @1
+
+
+@3
+	lda tmp+1
+;	and #$0f ; not necessary.
+	ora #'0'
+	sta space,x
+	inx
+@2
+	lda tmp
+	lsr a
+	lsr a
+	lsr a
+	lsr a
+	ora #'0'
+	sta space,x
+	inx
+@1
+	lda tmp
+	and #$0f
+	ora #'0'
+	sta space,x
+	inx
+
+	lda #'.'
+	sta space,x
+	inx
+	iny
+	cpy #4
+	bcc @loop
+	dex
+	rts
+
+
+to_bcd
+; uses decimal mode to convert A to BCD.
+	stz tmp
+	stz tmp+1
+
+	sed
+	ldx #8
+@loop
+	asl a
+	tay
+	lda tmp
+	adc tmp
+	sta tmp
+	lda tmp+1
+	adc tmp+1
+	sta tmp+1
+	tya
+	dex
+	bne @loop
+	cld
+	rts
+
+
+
+
+
+one_ip
+	sta $c0b6
+	ldy #0
+@loop
+	lda $c0b7
+	sta ip,y
+	iny
+	cpy #4
+	bne @loop
+
+one_ip_2
+	jsr ip_to_string
+	stx lowtr
+	jmp omm_put_str
+
+do_ip_get
+; & ip get addressvar, ...
+	jsr chrget
+	; read gateway, mask, ip from w5100.
+
+	lda a_space
+	sta lowtr+1
+	lda a_space+1
+	sta lowtr+2
+
+	stz $c0b5
+
+
+	lda #SIPR
+	jsr one_ip
+	jsr chrgot
+	cmp #','
+	bne @rts
+	jsr chkcom
+
+	lda #SUBR
+	jsr one_ip
+	jsr chrgot
+	cmp #','
+	bne @rts
+	jsr chkcom
+
+	lda #GAR
+	jsr one_ip
+	jsr chrgot
+	cmp #','
+	bne @rts
+	jsr chkcom
+
+	; dns address
+	ldy #0
+@loop
+	lda dns_address,y
+	sta ip,y
+	iny
+	cpy #4
+	bne @loop
+	jmp one_ip_2
+
+@rts
+	rts
+do_ip_peek
+; & ip peek var$
+;
+; returns peer ip address.
+;
+	jsr chrget
+
+	lda a_space
+	sta lowtr+1
+	lda a_space+1
+	sta lowtr+2
+	lda #4
+	sta $c0b5
+	lda #Sn_DIPR
+	jmp one_ip
+
+
+
+amper_ip
+; & ip (address, netmask, gateway, dns)
+; & ip peek var$
+; & ip get var$, ....
+	jsr chrgot
+	cmp #tkGET
+	beq do_ip_get
+	cmp #tkPEEK
+	beq do_ip_peek
+	jsr chkopn
+
+; ip address
+	jsr omm_get_str
+	jsr parse_ip_port
+	bcs @err
+	ldx #3
+@loop1
+	lda ip,x
+	sta ip_address,x
+	dex
+	bpl @loop1
+
+	jsr chrgot
+	cmp #','
+	bne @paren
+
+; netmask
+	jsr omm_get_str
+	jsr parse_ip_port
+	bcs @err
+	ldx #3
+@loop2
+	lda ip,x
+	sta subnet_mask,x
+	dex
+	bpl @loop2
+
+	jsr chrgot
+	cmp #','
+	bne @paren
+
+; gateway
+	jsr omm_get_str
+	jsr parse_ip_port
+	bcs @err
+	ldx #3
+@loop3
+	lda ip,x
+	sta gateway_address,x
+	dex
+	bpl @loop3
+
+	jsr chrgot
+	cmp #','
+	bne @paren
+
+; dns
+	jsr omm_get_str
+	jsr parse_ip_port
+	bcs @err
+	ldx #3
+@loop4
+	lda ip,x
+	sta gateway_address,x
+	dex
+	bpl @loop4
+
+@paren
+	jsr chkcls
+	jmp dhcp_commit
+
+
+@err
+	jmp $e199 ; illegal quantity error. 
+
+
+
+
+parse_mac
+; validate the mac string at lowtr, store to mac.
+; returns carry set on error.
+
+	lda lowtr
+	cmp #6*3-1
+	bne @bad
+
+	ldy #0
+	ldx #0
+
+@loop
+	lda (lowtr),y
+	jsr xdigit
+	bcs @bad
+	sta mac,x
+	inx
+	iny
+	lda (lowtr),y
+	jsr xdigit
+	bcs @bad
+	sta mac,x
+	inx
+	iny
+
+	cpy #6*3-1
+	beq @ok
+	lda (lowtr),y
+	cmp #':'
+	bne @bad
+	iny
+	bra @loop
+
+@ok	clc
+	rts
+
+@bad
+	sec
+	rts
+
+parse_ip_port
+;
+; validate the ip string at lowtr, store to ip
+; returns carry set on error.
+;
+; also parses : port
+
+	ldx #6-1
+@zloop
+	stz ip,x
+	dey
+	bne @zloop
+
+	lda lowtr
+	beq @err
+
+	ldy #0
+	ldx #0
+@loop
+	cpx #4
+	bcs @err
+	jsr get_num
+	pha
+	; lda tmp+1
+	; bne @err
+	lda tmp
+	sta ip,x
+
+	inx
+	iny
+	pla ; term. char / 0 = end of string.
+	beq @end
+
+	cmp #'.'
+	beq @loop
+	cmp #':'
+	bne @err
+
+	cpx #4
+	bne @err
+; port
+	jsr get_num
+	cmp #0
+	bne @err
+	lda tmp+1
+	sta port
+	lda tmp
+	sta port+1
+
+@ok
+	clc
+	rts
+
+@end
+	cpx #4
+	beq @ok
+
+@err
+	sec
+	rts
+
+get_num
+	stz tmp
+	stz tmp+1
+@loop
+	lda (lowtr+1),y
+	; returns last char so can't use xdigit.
+	cmp #'0'
+	bcc @no
+	cmp #'9'+1
+	bcs @no
+
+	and #$0f
+	pha ; save
+
+	asl tmp ; x 2
+	rol tmp+1
+	lda tmp+1
+	pha
+	lda tmp
+	pha
+
+	asl tmp ; x 4
+	rol tmp+1
+	asl tmp ; x 8
+	rol tmp+1
+	clc
+	pla
+	adc tmp
+	sta tmp
+	pla
+	adc tmp+1
+	sta tmp+1
+	clc
+	pla
+	adc tmp
+	sta tmp
+	lda #0
+	adc tmp+1
+	sta tmp+1
+
+	iny
+	cpy lowtr
+	bcc @loop
+	lda #0
+	rts
+@no
+	rts
+
+
+
+xdigit
+; convert character in a to hex value
+; returns carry set on error.
+; returns overflow set if hex ('a'-'f')
+	cmp #'0'
+	bcc @bad
+	cmp #'9'+1
+	bcs @x
+@num
+	and #$0f
+	rts
+
+@x
+	and #$df ; upper case it
+	cmp #'A'
+	bcc @bad
+	cmp #'F'+1
+	bcs @bad
+	and #$0f ; 1 - 6
+;	clc ; still clear
+	adc #9 ; 10 - 15
+	bit @rts ; set overflow flag.
+	rts ; carry will be clear
+
+@bad
+	sec
+@rts	rts
+
 
 
 read_status
@@ -143,6 +682,8 @@ command_x
 	stx $c0b7
 	rts
 
+sta_0_loop
+	lda #0
 sta_loop
 ; stores A to $c0b7 Y times.
 @loop
@@ -193,9 +734,9 @@ listen_or_connect
 	bra @cr
 
 @listen
-	lda #(6502)>>8
+	lda #>6502
 	sta $c0b7
-	lda #6502
+	lda #<6502
 	sta $c0b7
 @cr
 
@@ -289,51 +830,16 @@ dial_number
 
 * parse as xx.xx.xx.xx:port
 
-
-	ldx #6-1
-@zloop	stz ip,x
-	dex
-	bne @zloop
-
-	ldy #0
-	ldx #0
-
 	lda prmtbl
-	beq @err
+	sta lowtr
+	lda prmtbl+1
+	sta lowtr+1
+	lda prmtbl+2
+	sta lowtr+2
 
 
-
-	ldy #0
-	ldx #0
-@loop
-	cpx #4
+	jsr parse_ip_port
 	bcs @err
-	jsr get_num
-	pha
-	; lda tmp+1
-	; bne @bad
-	lda tmp
-	sta ip,x
-	inx
-	iny
-	pla
-
-	cmp #'.'
-	beq @loop
-	cmp #':'
-	bne @err
-
-	cpx #4
-	bne @err
-; port
-	jsr get_num
-	cmp #0
-	bne @err
-	lda tmp+1
-	sta port
-	lda tmp
-	sta port+1
-
 
 	lda #4
 	sta $c0b5
@@ -355,52 +861,8 @@ dial_number
 @err
 	rts
 
-get_num
-	stz tmp
-	stz tmp+1
-@loop
-	lda (prmtbl+1),y
-	cmp #'0'
-	bcc @no
-	cmp #'9'+1
-	bcs @no
 
-	and #$0f
-	pha ; save
 
-	asl tmp ; x 2
-	rol tmp+1
-	lda tmp+1
-	pha
-	lda tmp
-	pha
-
-	asl tmp ; x 4
-	rol tmp+1
-	asl tmp ; x 8
-	rol tmp+1
-	clc
-	pla
-	adc tmp
-	sta tmp
-	pla
-	adc tmp+1
-	sta tmp+1
-	clc
-	pla
-	adc tmp
-	sta tmp
-	lda #0
-	adc tmp+1
-	sta tmp+1
-
-	iny
-	cpy prmtbl
-	bcc @loop
-	lda #0
-	rts
-@no
-	rts
 
 
 
@@ -717,8 +1179,11 @@ request
 
 	;
 
-@ok	jmp dhcp_commit
-;	rts
+@ok	jsr dhcp_commit
+	ldx #Sn_CR_CLOSE
+	jsr command_x
+	clc
+	rts
 
 dhcp_error
 	sec
@@ -770,7 +1235,7 @@ data_avail
 
 send_dhcp_discover
 
-	lda dhcp_disc_pl_len
+	lda #dhcp_disc_pl_len
 	sta lowtr
 	lda a_dhcp_disc_pl
 	sta lowtr+1
@@ -792,11 +1257,11 @@ send_dhcp_request
 	bpl @iloop
 
 
-	lda dhcp_req_pl_len
+	lda #dhcp_req_pl_len
 	sta lowtr
-	lda dhcp_req_pl
+	lda a_dhcp_req_pl
 	sta lowtr+1
-	lda dhcp_req_pl+1
+	lda a_dhcp_req_pl+1
 	sta lowtr+2
 
 	bra send_dhcp_common
@@ -831,8 +1296,7 @@ send_dhcp_common
 
 	; 0-pad until mac address @28
 	ldy #28-bootp_hdr_len
-	lda #0
-	jsr sta_loop
+	jsr sta_0_loop
 
 	; mac address
 	ldy #0
@@ -845,8 +1309,7 @@ send_dhcp_common
 
 	; 0-pad until cookie at 236
 	ldy #236-34
-	lda #0
-	jmp sta_loop
+	jsr sta_0_loop
 
 
 	; copy dhcp options
@@ -863,8 +1326,7 @@ send_dhcp_common
 	sec
 	sbc lowtr
 	tay
-	lda #0
-	jsr sta_loop
+	jsr sta_0_loop
 
 	lda #04
 	sta $c0b5
@@ -873,10 +1335,10 @@ send_dhcp_common
 
 	clc
 	lda a1
-	adc #(300)
+	adc #<300
 	sta a1
 	lda a1+1
-	adc #(300)>>8
+	adc #>300
 	sta a1+1
 
 	sta $c0b7
@@ -1137,19 +1599,20 @@ dhcp_commit
 	lda #GAR
 	sta $c0b6
 
+; gateway and subnet
 	ldy #0
 @loop1	lda gateway_address,y
 	sta $c0b7
 	iny
-	cpy #4
+	cpy #8
 	bne @loop1
 
-	ldy #0
-@loop2	lda subnet_mask,y
-	sta $c0b7
-	iny
-	cpy #4
-	bne @loop2
+;	ldy #0
+;@loop2	lda subnet_mask,y
+;	sta $c0b7
+;	iny
+;	cpy #4
+;	bne @loop2
 
 	lda #SIPR
 	sta $c0b6
@@ -1162,15 +1625,6 @@ dhcp_commit
 
 ; send message to set DNS?
 
-; close the socket
-	lda #4
-	sta $c0b5
-	lda #Sn_CR
-	sta $c0b6
-	lda #Sn_CR_CLOSE
-	sta $c0b7
-
-	clc
 	rts
 
 
@@ -1196,6 +1650,9 @@ a_dhcp_disc_pl
 
 a_dhcp_req_pl
 	dc.w dhcp_req_pl
+
+a_space
+	dc.w space
 
 user_dispatch
 	dc.w init
@@ -1224,6 +1681,11 @@ option_dispatch
 	dc.w option_1,option_3,option_6,option_53,option_54
 
 
+amper_dispatch
+	dc.w amper_mset ; mset
+	dc.w amper_mac
+	dc.w amper_ip
+
 	dc.w 0
 
 *
@@ -1239,7 +1701,11 @@ connect_speed_str cstr '19200'
 
 amperct
 	dc.b 'MSET',0
+	dc.b 'MAC',0
+	dc.b 'IP',0
 	dc.b -1
+
+hex	dc.b '0123456789abcdef'
 
 
 tt_id	dc.b 0
@@ -1264,11 +1730,15 @@ int_flag	dc.b 0
 dhcp_retry	dc.b 0
 
 dhcp_msg_type	dc.b 0
-subnet_mask	dc.l 0
 dhcp_address	dc.l 0
-gateway_address	dc.l 0
-ip_address	dc.l 0
+
+; order is important.
+; gateway/subnet matches w5100
+; ip/subnet/gateway/dns (reversed) matches & ip 
 dns_address	dc.l 0
+gateway_address	dc.l 0
+subnet_mask	dc.l 0
+ip_address	dc.l 0
 
 option_table
 	dc.w 1,3,6,53,54
@@ -1307,6 +1777,9 @@ req_ip
 dhcp_req_pl_len equ *-dhcp_req_pl
 
 
+space	; mac = 6 * 3 = 18
+	; dns = 4 *3 = 12
+	ds.b 18
 
 end
 	endp

@@ -18,8 +18,8 @@
 		&load get "modules/Store"
 	endif
 
-	&load get "modules/Serial"
-	&load get "modules/Modem"
+	&load get "modules/SerialU2"
+	&load get "modules/ModemU2"
 
 	&load get "modules/Console"
 	&load get "modules/Terminal"
