@@ -341,6 +341,10 @@ one_ip
 one_ip_2
 	jsr ip_to_string
 	stx lowtr
+	lda a_space
+	sta lowtr+1
+	lda a_space+1
+	sta lowtr+2
 	jmp omm_put_str
 
 do_ip_get
@@ -348,13 +352,7 @@ do_ip_get
 	jsr chrget
 	; read gateway, mask, ip from w5100.
 
-	lda a_space
-	sta lowtr+1
-	lda a_space+1
-	sta lowtr+2
-
 	stz $c0b5
-
 
 	lda #SIPR
 	jsr one_ip
