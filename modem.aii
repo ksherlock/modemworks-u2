@@ -126,6 +126,9 @@ do_ampr
 	jmp (amper_dispatch,x)
 
 
+omm_put_word
+	ldy #OMM_PUTWORD
+	dc.b $2c
 omm_get_str
 	ldy #OMM_GETSTR
 	dc.b $2c ; bit absolute
@@ -141,10 +144,39 @@ call_omm
 
 ; & mset address
 amper_mset
+
 	jmp $d995 ; data - skips to next : or EOL.
-;	jsr frmnum
-;	jsr getadr
 	rts
+
+amper_bootp
+
+	lda #$80
+	sta bootp
+	jsr dhcp
+	bra return_a_word
+
+
+amper_dhcp
+; & DHCP [, var]
+; todo & DHCP NEW - force renew
+; todo & DHCP RESTORE - refresh existing lease
+
+	stz bootp
+	jsr dhcp
+
+return_a_word
+	sta a1
+	stz a1+1
+
+	jsr chrgot
+	cmp #','
+	beq @rv
+	rts
+@rv	jsr chrget
+	jsr omm_put_word
+	jmp listen
+
+
 
 amper_mac
 ; & mac (strexpr)
@@ -416,8 +448,10 @@ amper_ip
 	beq do_ip_peek
 	jsr chkopn
 
-; ip address
+@ip
 	jsr omm_get_str
+	lda lowtr
+	beq @netmask
 	jsr parse_ip_port
 	bcs @err
 	ldx #3
@@ -431,8 +465,10 @@ amper_ip
 	cmp #','
 	bne @paren
 
-; netmask
+@netmask
 	jsr omm_get_str
+	lda lowtr
+	beq @gateway
 	jsr parse_ip_port
 	bcs @err
 	ldx #3
@@ -446,8 +482,10 @@ amper_ip
 	cmp #','
 	bne @paren
 
-; gateway
+@gateway
 	jsr omm_get_str
+	lda lowtr
+	beq @dns
 	jsr parse_ip_port
 	bcs @err
 	ldx #3
@@ -461,8 +499,10 @@ amper_ip
 	cmp #','
 	bne @paren
 
-; dns
+@dns
 	jsr omm_get_str
+	lda lowtr
+	beq @paren
 	jsr parse_ip_port
 	bcs @err
 	ldx #3
@@ -474,8 +514,8 @@ amper_ip
 
 @paren
 	jsr chkcls
-	jmp dhcp_commit
-
+	jsr dhcp_commit
+	jmp listen
 
 @err
 	jmp $e199 ; illegal quantity error. 
@@ -768,15 +808,17 @@ reset
 * Output:
 * A = 0 on success, 1 on failure. [MWTR is backwards]
 
-	jsr dhcp
-	bcc @ok
-	lda #1
-	rts
-
-@ok
-	jsr listen
 	lda #0
-	rts
+
+;	jsr dhcp
+;	bcc @ok
+;	lda #1
+;	rts
+
+;@ok
+;	jsr listen
+;	lda #0
+;	rts
 
 exit
 	ldx #Sn_CR_CLOSE
@@ -1146,12 +1188,20 @@ discover
 	; timeout
 @retry	dec dhcp_retry
 	bne discover
-	jmp dhcp_error
+	bra dhcp_error
 @check
 	; check for a DHCP offer.
 	; if present, pull out the dhcp ip address and our ip address.
 
 	jsr read_message
+	bit bootp
+	bpl @notbootp
+	cmp #0
+	bne @retry
+	bra dhcp_ok
+
+
+@notbootp
 	cmp #DHCP_OFFER
 	beq request
 	bra @retry
@@ -1164,7 +1214,7 @@ request
 	; timeout
 @retry	dec dhcp_retry
 	bne request
-	jmp dhcp_error
+	bra dhcp_error
 
 @check
 	; check for an ACK
@@ -1172,18 +1222,25 @@ request
 
 	jsr read_message
 	cmp #DHCP_ACK
-	beq @ok
+	beq dhcp_ok
 	bra @retry
 
 	;
 
-@ok	jsr dhcp_commit
+dhcp_ok
+	jsr dhcp_commit
 	ldx #Sn_CR_CLOSE
 	jsr command_x
+
+	lda #1
 	clc
 	rts
 
 dhcp_error
+	ldx #Sn_CR_CLOSE
+	jsr command_x
+
+	lda #0
 	sec
 	rts
 
@@ -1233,13 +1290,24 @@ data_avail
 
 send_dhcp_discover
 
+	bit bootp
+	bmi @bootp
+
 	lda #dhcp_disc_pl_len
 	sta lowtr
 	lda a_dhcp_disc_pl
 	sta lowtr+1
 	lda a_dhcp_disc_pl+1
 	sta lowtr+2
+	bra send_dhcp_common
 
+@bootp
+	lda #bootp_req_pl_len
+	sta lowtr
+	lda a_bootp_req_pl
+	sta lowtr+1
+	lda a_bootp_req_pl+1
+	sta lowtr+2
 	bra send_dhcp_common
 
 
@@ -1369,6 +1437,7 @@ read_message
 
 	; set IDM address to rd buffer.
 
+	stz dhcp_msg_type
 
 	; a1 = Sn_RX_RD
 	lda #4
@@ -1649,6 +1718,9 @@ a_dhcp_disc_pl
 a_dhcp_req_pl
 	dc.w dhcp_req_pl
 
+a_bootp_req_pl
+	dc.w bootp_req_pl
+
 a_space
 	dc.w space
 
@@ -1683,6 +1755,8 @@ amper_dispatch
 	dc.w amper_mset ; mset
 	dc.w amper_mac
 	dc.w amper_ip
+	dc.w amper_dhcp
+	dc.w amper_bootp
 
 	dc.w 0
 
@@ -1701,6 +1775,8 @@ amperct
 	dc.b 'MSET',0
 	dc.b 'MAC',0
 	dc.b 'IP',0
+	dc.b 'DHCP',0
+	dc.b 'BOOTP',0
 	dc.b -1
 
 hex	dc.b '0123456789abcdef'
@@ -1725,6 +1801,8 @@ tmp	dc.w 0
 int_flag	dc.b 0
 
 
+
+bootp	dc.b 0
 dhcp_retry	dc.b 0
 
 dhcp_msg_type	dc.b 0
@@ -1751,8 +1829,10 @@ xid	dc.b $12,$34,$56,$78 ; xid
 	dc.b $00,$00,$80,00 ; seconds elapsed, flags (broadcast)
 bootp_hdr_len equ *-bootp_hdr
 
+
+
 dhcp_disc_pl ; cookie + discover + parm list
-	dc.b $63,$82,$53,$63
+cookie	dc.b $63,$82,$53,$63
 	dc.b $35,$01,$01
 	dc.b $37,$04,$01,$03,$06,$1a
 	dc.b $ff
@@ -1760,8 +1840,7 @@ dhcp_disc_pl_len equ *-dhcp_disc_pl
 
 
 dhcp_req_pl ; cookie + req + parm list
-
-cookie	dc.b $63,$82,$53,$63
+	dc.b $63,$82,$53,$63
 	dc.b $35,$01,$03
 	dc.b $37,$04,$01,$03,$06,$1a
 	dc.b $39,$02,$05,$b4
@@ -1773,6 +1852,12 @@ req_ip
 	dc.b $ff,$ff,$ff,$ff ; req. ip
 	dc.b $ff
 dhcp_req_pl_len equ *-dhcp_req_pl
+
+
+bootp_req_pl
+	dc.b $63,$82,$53,$63
+	dc.b $ff
+bootp_req_pl_len equ *-bootp_req_pl
 
 
 space	; mac = 6 * 3 = 18
