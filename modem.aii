@@ -150,10 +150,9 @@ amper_mset
 
 amper_bootp
 
-	lda #$80
-	sta bootp
-	jsr dhcp
-	bra return_a_word
+	sec
+	ror bootp
+	bra amper_dhcp2
 
 
 amper_dhcp
@@ -162,6 +161,7 @@ amper_dhcp
 ; todo & DHCP RESTORE - refresh existing lease
 
 	stz bootp
+amper_dhcp2
 	jsr dhcp
 
 return_a_word
@@ -801,6 +801,9 @@ init
 
 	; should store slot ptrs so it's not hardcoded.
 
+	lda prmtbl
+	sta slot
+
 *
 * Called by &USR 6
 *
@@ -808,17 +811,37 @@ reset
 * Output:
 * A = 0 on success, 1 on failure. [MWTR is backwards]
 
+	; re-set, enable auto-increment mode
+
+	lda #$80
+	sta $c0b4
+	nop
+	nop
+	lda #$03
+	sta $c0b4
+	; give all memory to socket 0
+
+	lda #RMSR
+	stz $c0b5
+	sta $c0b6
+	lda #%00000011 ; 8k for the socket
+	sta $c0b7 ; RMSR
+	sta $c0b7 ; TMSR
+
+	; set the MAC address...
+	lda #SHAR
+	sta $c0b6
+	ldy #0
+@mloop
+	lda mac,y
+	sta $c0b7
+	iny
+	cpy #6
+	bne @mloop
+
 	lda #0
+	rts
 
-;	jsr dhcp
-;	bcc @ok
-;	lda #1
-;	rts
-
-;@ok
-;	jsr listen
-;	lda #0
-;	rts
 
 exit
 	ldx #Sn_CR_CLOSE
@@ -1118,33 +1141,6 @@ connect_speed_cstr
 
 
 dhcp
-	; re-set, enable auto-increment mode
-
-	lda #$80
-	sta $c0b4
-	nop
-	nop
-	lda #$03
-	sta $c0b4
-	; give all memory to socket 0
-
-	lda #RMSR
-	stz $c0b5
-	sta $c0b6
-	lda #%00000011 ; 8k for the socket
-	sta $c0b7 ; RMSR
-	sta $c0b7 ; TMSR
-
-	; set the MAC address...
-	lda #SHAR
-	sta $c0b6
-	ldy #0
-@mloop
-	lda mac,y
-	sta $c0b7
-	iny
-	cpy #6
-	bne @mloop
 
 ; socket 1 = UDP, broadcast
 	lda #$04
@@ -1784,6 +1780,8 @@ hex	dc.b '0123456789abcdef'
 
 tt_id	dc.b 0
 pt_id	dc.b 0
+
+slot	dc.b 0
 
 server	dc.b 0
 mode	dc.b 0

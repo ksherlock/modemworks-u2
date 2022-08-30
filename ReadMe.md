@@ -39,7 +39,7 @@ See the ModemWorks manual for more information on usage.
 
 Sets the hardware MAC address.
 
-'& MAC GET strvar'
+`& MAC GET strvar`
 
 Returns the MAC address.
 
