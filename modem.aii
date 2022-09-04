@@ -50,7 +50,7 @@ a4	equ $42
 
 prmtbl	equ $e0
 lowtr	equ $9b
-rndseed	equ $c9
+rndseed	equ $c9 ; 5-byte fp value. 
 
 iqerr	equ $e199 ; generate illegal quantity error.
 
@@ -764,7 +764,7 @@ listen_or_connect
 	cpx #Sn_CR_LISTEN
 	beq @listen
 
-	lda rndseed
+	lda rndseed+1
 	sta $c0b7
 	inc lport
 	lda lport
@@ -839,6 +839,15 @@ reset
 	cpy #6
 	bne @mloop
 
+; if this is a reset, ip address may exist from before.
+; so set it and listen.
+	lda ip_address
+	beq @exit
+
+	jsr dhcp_commit
+	jsr listen
+
+@exit
 	lda #0
 	rts
 
@@ -1173,6 +1182,14 @@ dhcp
 	lda #Sn_CR_OPEN
 	sta $c0b7
 
+; generate random xid from rndseed
+	ldx #3
+@xloop	lda rndseed+1,x
+	sta xid,x
+	dex
+	bpl @xloop
+
+
 	lda #5
 	sta dhcp_retry
 
@@ -1298,15 +1315,10 @@ send_dhcp_discover
 	bra send_dhcp_common
 
 @bootp
-	lda #bootp_req_pl_len
-	sta lowtr
-	lda a_bootp_req_pl
-	sta lowtr+1
-	lda a_bootp_req_pl+1
-	sta lowtr+2
+	stz lowtr
+	stz lowtr+1
+	stz lowtr+2
 	bra send_dhcp_common
-
-
 
 send_dhcp_request
 
@@ -1374,17 +1386,29 @@ send_dhcp_common
 	jsr sta_0_loop
 
 
+	; cookie
+	ldy #3
+@cloop	lda cookie_rev,y
+	sta $c0b7
+	dey
+	bpl @cloop
+
 	; copy dhcp options
 	ldy #0
 @dloop
+	cpy lowtr
+	beq @e
 	lda (lowtr+1),y
 	sta $c0b7
 	iny
-	cpy lowtr
-	bne @dloop
+	bra @dloop
+
+	; end of options.
+@e	lda #$ff
+	sta $c0b7
 
 	; 0-pad to 300 bytes
-	lda #300-236
+	lda #300-236-5 ; -5 to account for cookie / $ff 
 	sec
 	sbc lowtr
 	tay
@@ -1407,7 +1431,7 @@ send_dhcp_common
 	lda a1
 	sta $c0b7
 
-	ldx #Sn_CR_SEND_MAC
+	ldx #Sn_CR_SEND ;
 	jmp command_x
 
 
@@ -1529,13 +1553,12 @@ check_cookie
 	; check the cookie
 	lda #236+8
 	jsr set_rx_ptr
-	ldy #0
+	ldy #3
 @loop	lda $c0b7
-	cmp cookie,y
+	cmp cookie_rev,y
 	bne rm_bad
-	iny
-	cpy #4
-	bne @loop
+	dey
+	bpl @loop
 
 
 	; parse the options.  only looking for 
@@ -1714,9 +1737,6 @@ a_dhcp_disc_pl
 a_dhcp_req_pl
 	dc.w dhcp_req_pl
 
-a_bootp_req_pl
-	dc.w bootp_req_pl
-
 a_space
 	dc.w space
 
@@ -1828,34 +1848,28 @@ xid	dc.b $12,$34,$56,$78 ; xid
 bootp_hdr_len equ *-bootp_hdr
 
 
+cookie_rev ; dhcp / bootp cookie, in reversed order.
+	dc.b $63,$53,$82,$63
 
-dhcp_disc_pl ; cookie + discover + parm list
-cookie	dc.b $63,$82,$53,$63
-	dc.b $35,$01,$01
-	dc.b $37,$04,$01,$03,$06,$1a
-	dc.b $ff
+
+dhcp_disc_pl
+	dc.b $35,$01,$01 ; dhcp discover
+;	dc.b $37,$04,$01,$03,$06,$1a ; parm list
 dhcp_disc_pl_len equ *-dhcp_disc_pl
 
 
-dhcp_req_pl ; cookie + req + parm list
-	dc.b $63,$82,$53,$63
-	dc.b $35,$01,$03
-	dc.b $37,$04,$01,$03,$06,$1a
-	dc.b $39,$02,$05,$b4
-	dc.b $36,$04
+dhcp_req_pl
+	dc.b $35,$01,$03 ; dhcp request
+	dc.b $37,$03,$01,$03,$06 ; parm list
+;	dc.b $39,$02,$05,$b4 ; max dhcp messge size
+	dc.b $36,$04 ; dhcp server
 req_server_ip
 	dc.b $ff,$ff,$ff,$ff ; dhcp server id
-	dc.b $32,$04
+	dc.b $32,$04 ; requested ip
 req_ip
 	dc.b $ff,$ff,$ff,$ff ; req. ip
-	dc.b $ff
 dhcp_req_pl_len equ *-dhcp_req_pl
 
-
-bootp_req_pl
-	dc.b $63,$82,$53,$63
-	dc.b $ff
-bootp_req_pl_len equ *-bootp_req_pl
 
 
 space	; mac = 6 * 3 = 18
